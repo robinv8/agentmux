@@ -9,10 +9,10 @@ final class AppModel: ObservableObject {
     @Published var status: String = "Starting…"
     @Published var projectsRootPath: String
     @Published var errorBanner: String?
+    @Published var localAgents: [LocalAgentRow] = []
+    @Published var agentsStatus: String = ""
 
-    /// Streaming assistant bubble currently being built (merged on turn end).
     private var streamingAssistantID: UUID?
-
     private var session: SuperAgentSession?
     private let projectsRoot: URL
 
@@ -24,8 +24,9 @@ final class AppModel: ObservableObject {
 
     func bootstrap() {
         errorBanner = nil
+        refreshLocalAgents()
         guard let executable = AgentMuxExecutableLocator.locate() else {
-            errorBanner = "找不到 am / agentmux。请先安装 CLI（bun link 或 install.sh）。"
+            errorBanner = "找不到 am / agentmux。请先安装 CLI。"
             status = "Missing am"
             append(.system, "Install AgentMux CLI, then reopen this app.")
             return
@@ -47,14 +48,36 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await session.start()
-                status = "Super Agent ready — just talk"
+                status = "Super Agent ready"
                 append(
                     .system,
-                    "直接用自然语言说需求。我会选择项目并派工人（不必先选项目）。"
+                    "直接自然语言对话。左侧是本机 agent；我只会把活派给「可调度」的 worker（目前是 Pi）。"
                 )
             } catch {
                 errorBanner = error.localizedDescription
                 status = "Failed to start"
+            }
+        }
+    }
+
+    func refreshLocalAgents() {
+        agentsStatus = "扫描中…"
+        guard let executable = AgentMuxExecutableLocator.locate() else {
+            localAgents = []
+            agentsStatus = "无 am"
+            return
+        }
+        Task {
+            do {
+                let rows = try await LocalAgentScan.scan(executable: executable)
+                localAgents = rows
+                let avail = rows.filter(\.available).count
+                let running = rows.reduce(0) { $0 + $1.runningCount }
+                let workers = rows.filter(\.dispatchable).count
+                agentsStatus = "可用 \(avail) · 进程 \(running) · 可调度 \(workers)"
+            } catch {
+                agentsStatus = "扫描失败"
+                errorBanner = error.localizedDescription
             }
         }
     }
@@ -79,6 +102,8 @@ final class AppModel: ObservableObject {
                 isBusy = false
                 status = "Ready"
                 streamingAssistantID = nil
+                // refresh agent process counts after a turn
+                refreshLocalAgents()
             } catch {
                 isBusy = false
                 status = "Error"
@@ -91,13 +116,12 @@ final class AppModel: ObservableObject {
 
     func clearChat() {
         lines.removeAll()
-        append(.system, "对话已清空（Super Agent 进程仍保留上下文，需要完全重置请重启 App）。")
+        append(.system, "对话已清空。")
     }
 
     private func handleSessionLine(_ line: ChatLine) {
         switch line.kind {
         case .assistant:
-            // Merge streaming chunks into one bubble
             if let id = streamingAssistantID,
                let idx = lines.firstIndex(where: { $0.id == id })
             {

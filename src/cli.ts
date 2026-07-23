@@ -27,6 +27,8 @@ const RESERVED = new Set([
     "repl",
     "super",
     "s",
+    "agents",
+    "agent",
     "help",
     "--help",
     "-h",
@@ -79,6 +81,26 @@ export async function runCli(argv: string[]): Promise<number> {
                     (i) => i.status === "running" || i.status === "idle",
                 ).length;
                 console.log(`Workers online: ${online}`);
+                return 0;
+            }
+            case "agents":
+            case "agent": {
+                const { scanLocalAgents, formatLocalAgentsTable } =
+                    await import("./local-agents.js");
+                const only =
+                    rest.includes("--available") || rest.includes("-a");
+                const asJson = rest.includes("--json") || rest.includes("-j");
+                let agents = await scanLocalAgents();
+                if (only) agents = agents.filter((x) => x.available);
+                if (asJson) {
+                    console.log(JSON.stringify(agents, null, 2));
+                    return 0;
+                }
+                console.log(formatLocalAgentsTable(agents));
+                console.log("");
+                console.log(
+                    `Available: ${agents.filter((x) => x.available).length} · Running procs (sum): ${agents.reduce((n, x) => n + x.runningCount, 0)} · Dispatchable workers: ${agents.filter((x) => x.dispatchable).length}`,
+                );
                 return 0;
             }
             case "status": {
@@ -371,6 +393,8 @@ Direct worker (advanced / power users):
 
 Inspect:
   am list                       Projects under ~/Projects
+  am agents                     Local agents (path / running / dispatchable)
+  am agents -a                  Only available on disk
   am status <project>
 
 Examples:

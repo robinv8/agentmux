@@ -4,6 +4,10 @@
  */
 import { discoverProjects, resolveProjectTarget } from "./discovery.js";
 import { runOneShot } from "./oneshot.js";
+import {
+    formatLocalAgentsTable,
+    scanLocalAgents,
+} from "./local-agents.js";
 import type { ProjectEntry } from "./types.js";
 
 export type ChatRole = "user" | "assistant";
@@ -63,16 +67,18 @@ The user talks ONLY to you. You decide which project(s) need work and you dispat
 
 Tools:
 - list_projects: see projects under the user's Projects folder
-- run_in_project: run a one-shot coding agent in a project (workers do the coding; you orchestrate)
+- list_local_agents: see coding agents installed / running on this machine (grok, codex, kimi, claude, pi, …)
+- run_in_project: run a one-shot coding worker (currently Pi) in a project
 
 Rules:
 1. Prefer list_projects when the project name is ambiguous.
-2. When the user names a project, use run_in_project with a clear, self-contained worker prompt.
-3. You may run multiple projects in one turn if the user asks for multiple things.
-4. After tools finish, summarize results for the user in Chinese if they write Chinese, else match their language.
-5. Do not claim you edited code yourself — workers do. Report what workers returned.
-6. If a worker fails (auth, missing project), explain clearly and suggest next steps.
-7. Keep worker prompts concrete: goal, constraints, "do not unrelated refactors".`;
+2. When the user asks what agents are available, use list_local_agents.
+3. When the user names a project, use run_in_project with a clear, self-contained worker prompt.
+4. You may run multiple projects in one turn if the user asks for multiple things.
+5. After tools finish, summarize results for the user in Chinese if they write Chinese, else match their language.
+6. Do not claim you edited code yourself — workers do. Report what workers returned.
+7. Be honest: only agents with dispatchable=yes can be used as workers today (Pi). Others may be installed/running but not yet wired.
+8. Keep worker prompts concrete: goal, constraints, "do not unrelated refactors".`;
 
 const TOOLS = [
     {
@@ -85,6 +91,20 @@ const TOOLS = [
                 filter: {
                     type: "string",
                     description: "Optional substring filter on project name",
+                },
+            },
+        },
+    },
+    {
+        name: "list_local_agents",
+        description:
+            "List coding agents available on this machine: installed path, version, running count, and whether Super Agent can dispatch work to them.",
+        input_schema: {
+            type: "object",
+            properties: {
+                onlyAvailable: {
+                    type: "boolean",
+                    description: "If true, only list agents found on disk",
                 },
             },
         },
@@ -267,6 +287,17 @@ async function executeTool(
                     lines.length > 0
                         ? `Projects (${filtered.length}):\n${lines.join("\n")}`
                         : "No projects matched.",
+                isError: false,
+            };
+        }
+
+        if (name === "list_local_agents") {
+            let agents = await scanLocalAgents();
+            if (input.onlyAvailable === true) {
+                agents = agents.filter((a) => a.available);
+            }
+            return {
+                text: formatLocalAgentsTable(agents),
                 isError: false,
             };
         }

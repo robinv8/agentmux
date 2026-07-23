@@ -9,3 +9,4 @@ export * from "./pi-path.js";
 export * from "./commander.js";
 export * from "./super-agent.js";
 export * from "./super-rpc.js";
+export * from "./local-agents.js";

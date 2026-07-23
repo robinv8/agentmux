@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build / caches
+dist/
+build/
+.cache/
+*.tsbuildinfo
+
+# Logs & coverage
+*.log
+coverage/
+.nyc_output/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local env & secrets
+.env
+.env.*
+!.env.example
+
+# Local Pi / agent runtime state (do not ship user sockets or registries)
+.pi/agent/
+*.sock
+
+# Test / evidence scratch
+tmp/
+.scratch/

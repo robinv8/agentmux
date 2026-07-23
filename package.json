@@ -1,0 +1,51 @@
+{
+  "name": "agentmux",
+  "version": "0.1.0",
+  "description": "Multi-project agent mux: list, dispatch, and status for local Pi RPC workers",
+  "type": "module",
+  "license": "MIT",
+  "author": "robinv8",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robinv8/agentmux.git"
+  },
+  "bugs": {
+    "url": "https://github.com/robinv8/agentmux/issues"
+  },
+  "homepage": "https://github.com/robinv8/agentmux#readme",
+  "keywords": [
+    "agent",
+    "pi",
+    "coding-agent",
+    "multi-project",
+    "rpc",
+    "cli",
+    "orchestration"
+  ],
+  "bin": {
+    "agentmux": "./bin/agentmux.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./extension": "./extensions/commander.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "list": "bun run bin/agentmux.js list",
+    "status": "bun run bin/agentmux.js status",
+    "dispatch": "bun run bin/agentmux.js dispatch"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pi": {
+    "extensions": ["./extensions/commander.ts"]
+  }
+}

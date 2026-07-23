@@ -25,6 +25,8 @@ const RESERVED = new Set([
     "register",
     "chat",
     "repl",
+    "super",
+    "s",
     "help",
     "--help",
     "-h",
@@ -41,12 +43,32 @@ export async function runCli(argv: string[]): Promise<number> {
     const config = defaultCommanderConfig();
 
     try {
-        // Primary UX: agentmux <project> <message...>
+        // Direct worker path still supported: am <project> <message>
         if (!RESERVED.has(cmd) && rest.length > 0) {
             return await runToProject(config, cmd, rest.join(" "));
         }
 
         switch (cmd) {
+            case "super":
+            case "s":
+            case "chat":
+            case "repl": {
+                // Primary product path: talk to the Super Agent
+                if (rest[0] === "--rpc" || rest[0] === "rpc") {
+                    const { runSuperRpcStdio } = await import("./super-rpc.js");
+                    await runSuperRpcStdio({
+                        projectsRoot: config.projectsRoot,
+                    });
+                    return 0;
+                }
+                if (rest[0] === "-m" || rest[0] === "--message") {
+                    return await runSuperOnce(config, rest.slice(1).join(" "));
+                }
+                if (rest.length > 0) {
+                    return await runSuperOnce(config, rest.join(" "));
+                }
+                return await runSuperRepl(config);
+            }
             case "list":
             case "ls": {
                 const { table, items } = await listProjects(config);
@@ -168,10 +190,6 @@ export async function runCli(argv: string[]): Promise<number> {
                 console.log(JSON.stringify(rec, null, 2));
                 return 0;
             }
-            case "chat":
-            case "repl": {
-                return await runRepl(config);
-            }
             default:
                 // Single token that looks like a project but no message
                 if (!RESERVED.has(cmd) && rest.length === 0) {
@@ -230,47 +248,106 @@ async function runToProject(
     return 0;
 }
 
-async function runRepl(
+async function runSuperOnce(
+    config: ReturnType<typeof defaultCommanderConfig>,
+    text: string,
+): Promise<number> {
+    const { createDefaultSuperConfig, runSuperTurn } = await import(
+        "./super-agent.js"
+    );
+    const superConfig = createDefaultSuperConfig(config.projectsRoot);
+    try {
+        const result = await runSuperTurn({
+            config: superConfig,
+            history: [],
+            userText: text,
+            onEvent: (ev) => {
+                if (ev.type === "assistant_text" && ev.text) {
+                    process.stdout.write(ev.text);
+                } else if (ev.type === "tool_start") {
+                    console.error(
+                        `\n[tool] ${ev.toolName} ${JSON.stringify(ev.toolInput ?? {})}`,
+                    );
+                } else if (ev.type === "tool_end") {
+                    console.error(
+                        `[tool done] ${ev.toolName}: ${(ev.toolResult ?? "").slice(0, 200)}`,
+                    );
+                } else if (ev.type === "error") {
+                    console.error(`[error] ${ev.error}`);
+                }
+            },
+        });
+        if (result.assistantText && !result.assistantText.endsWith("\n")) {
+            process.stdout.write("\n");
+        }
+        return 0;
+    } catch (e) {
+        console.error(e instanceof Error ? e.message : String(e));
+        return 1;
+    }
+}
+
+async function runSuperRepl(
     config: ReturnType<typeof defaultCommanderConfig>,
 ): Promise<number> {
-    console.error("AgentMux chat — type `project message` or /list /help /quit");
+    const { createDefaultSuperConfig, runSuperTurn } = await import(
+        "./super-agent.js"
+    );
+    const superConfig = createDefaultSuperConfig(config.projectsRoot);
+    let history: import("./super-agent.js").ChatMessage[] = [];
+
+    console.error("AgentMux Super Agent — talk naturally. /quit to exit.");
+    console.error(`Projects root: ${config.projectsRoot}`);
     const rl = readline.createInterface({ input, output, terminal: true });
 
     try {
         while (true) {
-            const line = (await rl.question("AgentMux> ")).trim();
+            const line = (await rl.question("You> ")).trim();
             if (!line) continue;
             if (line === "/quit" || line === "/exit" || line === "quit") break;
-            if (line === "/help" || line === "help") {
+            if (line === "/help") {
                 console.log(
-                    "  <project> <message>   one-shot run in that project\n" +
-                        "  /list                 list projects\n" +
-                        "  /status <project>     worker status\n" +
-                        "  /quit                 exit",
+                    "  (default) natural language → Super Agent dispatches workers\n" +
+                        "  /list     show projects\n" +
+                        "  /reset    clear conversation\n" +
+                        "  /quit",
                 );
                 continue;
             }
-            if (line === "/list" || line === "list") {
+            if (line === "/list") {
                 const { table } = await listProjects(config);
                 console.log(table);
                 continue;
             }
-            if (line.startsWith("/status ")) {
-                const q = line.slice("/status ".length).trim();
-                const s = await statusForProject(config, q);
-                console.log(JSON.stringify(s, null, 2));
+            if (line === "/reset") {
+                history = [];
+                console.error("(history cleared)");
                 continue;
             }
 
-            // project message — first token is project
-            const sp = line.indexOf(" ");
-            if (sp === -1) {
-                console.error("Need: <project> <message>");
-                continue;
+            process.stdout.write("Super> ");
+            try {
+                const result = await runSuperTurn({
+                    config: superConfig,
+                    history,
+                    userText: line,
+                    onEvent: (ev) => {
+                        if (ev.type === "assistant_text" && ev.text) {
+                            process.stdout.write(ev.text);
+                        } else if (ev.type === "tool_start") {
+                            process.stderr.write(
+                                `\n  ↳ ${ev.toolName}…\nSuper> `,
+                            );
+                        }
+                    },
+                });
+                history = result.history;
+                if (!result.assistantText.endsWith("\n")) {
+                    process.stdout.write("\n");
+                }
+            } catch (e) {
+                console.error(e instanceof Error ? e.message : String(e));
             }
-            const projectQuery = line.slice(0, sp);
-            const message = line.slice(sp + 1).trim();
-            await runToProject(config, projectQuery, message);
         }
     } finally {
         rl.close();
@@ -279,38 +356,34 @@ async function runRepl(
 }
 
 function printHelp(): void {
-    // Prefer short form in help so muscle memory sticks.
-    console.log(`AgentMux — one commander, many local projects (Pi RPC)
+    console.log(`AgentMux — Super Agent that dispatches project workers
 Command: am  (alias of agentmux)
 
-Primary (no worker terminal needed):
-  am <project> <message...>     Run a one-shot agent in that project
-  am run <project> <message...> Same as above
-  am chat                       Interactive loop
+Primary (talk to the Super Agent — it picks projects & workers):
+  am super                      Interactive Super Agent chat
+  am super <message...>         One Super Agent turn
+  am super --rpc                JSONL protocol for the macOS app
+  am chat                       Alias of am super
+
+Direct worker (advanced / power users):
+  am <project> <message...>     Skip Super Agent; one-shot worker only
+  am run <project> <message...> Same
 
 Inspect:
-  am list                       Projects under ~/Projects + status
+  am list                       Projects under ~/Projects
   am status <project>
 
-Advanced (long-lived workers):
-  am serve <project>            Keep a Pi RPC worker up
-  am dispatch <project> <msg>   Prompt a registered long-lived worker
-  am register <project> --socket PATH [--pid N]
-
 Examples:
-  am list
-  am mindmux-app Fix the login form validation
-  am run AIDesignPrompt Run bun test schema/goal and fix failures
-  am chat
+  am super 看下我有哪些项目
+  am super mindmux-app 登录页提交后没跳转，帮我查
+  am super 同时看 md-converter 的 README 和 agentmux 的 package 名
 
 Env:
   AGENTMUX_PROJECTS_ROOT   default: ~/Projects
-  AGENTMUX_REGISTRY        default: ~/.pi/agent/workers.json
-  AGENTMUX_SOCKETS         default: ~/.pi/agent/worker-sockets
-  AGENTMUX_PROVIDER        e.g. kimi-coding (passed to pi --provider)
-  AGENTMUX_MODEL           e.g. kimi-for-coding (passed to pi --model)
-  PI_BIN                   override Pi binary (default: bundled with AgentMux)
-  KIMI_API_KEY             for kimi-coding (falls back to ANTHROPIC_AUTH_TOKEN)
+  KIMI_API_KEY             Super Agent + workers (or ANTHROPIC_AUTH_TOKEN)
+  ANTHROPIC_BASE_URL       default: https://api.kimi.com/coding
+  AGENTMUX_SUPER_MODEL     default: kimi-for-coding
+  AGENTMUX_PROVIDER/MODEL  worker Pi defaults
 
 Install:
   curl -fsSL https://raw.githubusercontent.com/robinv8/agentmux/main/scripts/install.sh | bash

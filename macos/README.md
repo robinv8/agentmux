@@ -1,6 +1,6 @@
 # AgentMux for macOS (native)
 
-SwiftUI client for the same **list → select project → one-shot task → stream** flow as the CLI (`am`).
+SwiftUI **Super Agent chat** client. You talk to one foreman; it calls tools to list projects and run workers (`am super --rpc`).
 
 ## Requirements
 
@@ -32,10 +32,10 @@ Bare `swift run AgentMuxApp` can start a process that never becomes the key app 
 
 ## UI
 
-1. **Projects** sidebar — direct children of the Projects root (default `~/Projects`, overridable in the field / `AGENTMUX_PROJECTS_ROOT`)
-2. Select a project
-3. Enter a task
-4. **Run one-shot** (`⌘↩`) — spawns `am <project> <message>` and streams stdout/stderr into the transcript
+1. Chat with **Super Agent** (not a project picker)
+2. Super Agent may call `list_projects` / `run_in_project` (shown as tool lines)
+3. Workers run via the existing one-shot path under the hood
+4. `⌘↩` to send
 
 ## Tests
 

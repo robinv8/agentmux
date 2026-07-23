@@ -3,109 +3,124 @@ import AgentMuxKit
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var projects: [ProjectEntry] = []
-    @Published var selectedProjectID: String?
-    @Published var taskText: String = ""
-    @Published var transcript: String = ""
-    @Published var isRunning: Bool = false
-    @Published var lastStatus: String = "Idle"
+    @Published var lines: [ChatLine] = []
+    @Published var draft: String = ""
+    @Published var isBusy: Bool = false
+    @Published var status: String = "Starting…"
     @Published var projectsRootPath: String
     @Published var errorBanner: String?
 
-    private let runner: OneShotRunner
+    /// Streaming assistant bubble currently being built (merged on turn end).
+    private var streamingAssistantID: UUID?
 
-    init(runner: OneShotRunner = OneShotRunner()) {
-        self.runner = runner
-        self.projectsRootPath = ProjectDiscovery.defaultProjectsRoot().path
+    private var session: SuperAgentSession?
+    private let projectsRoot: URL
+
+    init() {
+        let root = ProjectDiscovery.defaultProjectsRoot()
+        self.projectsRoot = root
+        self.projectsRootPath = root.path
     }
 
-    var selectedProject: ProjectEntry? {
-        projects.first { $0.id == selectedProjectID }
-    }
-
-    func refreshProjects() {
+    func bootstrap() {
         errorBanner = nil
-        let root = URL(fileURLWithPath: projectsRootPath, isDirectory: true)
-        do {
-            projects = try ProjectDiscovery.discover(
-                options: .init(projectsRoot: root)
-            )
-            if selectedProjectID == nil {
-                selectedProjectID = projects.first?.id
-            } else if !projects.contains(where: { $0.id == selectedProjectID }) {
-                selectedProjectID = projects.first?.id
-            }
-            lastStatus = "Loaded \(projects.count) projects"
-        } catch {
-            projects = []
-            errorBanner = error.localizedDescription
-            lastStatus = "List failed"
-        }
-    }
-
-    func runTask() {
-        guard !isRunning else { return }
-        guard let project = selectedProject else {
-            errorBanner = "Select a project"
-            return
-        }
-        let message = taskText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty else {
-            errorBanner = "Enter a task"
-            return
-        }
         guard let executable = AgentMuxExecutableLocator.locate() else {
-            errorBanner = "Cannot find `am` / agentmux. Install AgentMux first."
-            lastStatus = "Missing am"
+            errorBanner = "找不到 am / agentmux。请先安装 CLI（bun link 或 install.sh）。"
+            status = "Missing am"
+            append(.system, "Install AgentMux CLI, then reopen this app.")
             return
         }
 
         let root = URL(fileURLWithPath: projectsRootPath, isDirectory: true)
-        let invocation: OneShotInvocation
-        do {
-            invocation = try OneShotInvocationBuilder.build(
-                projectName: project.name,
-                message: message,
-                projectsRoot: root,
-                agentMuxExecutable: executable
-            )
-        } catch {
-            errorBanner = error.localizedDescription
-            return
-        }
-
-        isRunning = true
-        errorBanner = nil
-        transcript = ""
-        lastStatus = "Running \(project.name)…"
+        let session = SuperAgentSession(
+            executable: executable,
+            projectsRoot: root,
+            onEvent: { [weak self] line in
+                Task { @MainActor in
+                    self?.handleSessionLine(line)
+                }
+            }
+        )
+        self.session = session
+        status = "Connecting Super Agent…"
 
         Task {
             do {
-                let result = try await runner.run(
-                    invocation,
-                    onStdout: { [weak self] chunk in
-                        Task { @MainActor in
-                            self?.transcript.append(chunk)
-                        }
-                    },
-                    onStderr: { [weak self] chunk in
-                        Task { @MainActor in
-                            self?.transcript.append(chunk)
-                        }
-                    }
+                try await session.start()
+                status = "Super Agent ready — just talk"
+                append(
+                    .system,
+                    "直接用自然语言说需求。我会选择项目并派工人（不必先选项目）。"
                 )
-                isRunning = false
-                if result.succeeded {
-                    lastStatus = "Succeeded (exit 0)"
-                } else {
-                    lastStatus = "Failed (exit \(result.exitCode))"
-                }
             } catch {
-                isRunning = false
-                lastStatus = "Error"
                 errorBanner = error.localizedDescription
-                transcript.append("\n[error] \(error.localizedDescription)\n")
+                status = "Failed to start"
             }
         }
+    }
+
+    func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isBusy else { return }
+        guard let session else {
+            errorBanner = "Super Agent 未启动"
+            return
+        }
+
+        draft = ""
+        isBusy = true
+        status = "Thinking / dispatching…"
+        append(.user, text)
+        streamingAssistantID = nil
+
+        Task {
+            do {
+                _ = try await session.sendUser(text)
+                isBusy = false
+                status = "Ready"
+                streamingAssistantID = nil
+            } catch {
+                isBusy = false
+                status = "Error"
+                errorBanner = error.localizedDescription
+                append(.error, error.localizedDescription)
+                streamingAssistantID = nil
+            }
+        }
+    }
+
+    func clearChat() {
+        lines.removeAll()
+        append(.system, "对话已清空（Super Agent 进程仍保留上下文，需要完全重置请重启 App）。")
+    }
+
+    private func handleSessionLine(_ line: ChatLine) {
+        switch line.kind {
+        case .assistant:
+            // Merge streaming chunks into one bubble
+            if let id = streamingAssistantID,
+               let idx = lines.firstIndex(where: { $0.id == id })
+            {
+                lines[idx].text += line.text
+            } else {
+                let id = UUID()
+                streamingAssistantID = id
+                lines.append(ChatLine(id: id, kind: .assistant, text: line.text))
+            }
+        case .tool, .system, .error, .user:
+            lines.append(line)
+            if line.kind == .error {
+                errorBanner = line.text
+            }
+        }
+    }
+
+    private func append(_ kind: ChatLine.Kind, _ text: String) {
+        lines.append(ChatLine(kind: kind, text: text))
+    }
+
+    deinit {
+        let s = session
+        Task { await s?.shutdown() }
     }
 }

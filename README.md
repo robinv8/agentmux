@@ -1,8 +1,13 @@
 # AgentMux
 
-**One command. Right project. Done.**
+**One Super Agent. Many project workers.**
 
-AgentMux runs a [Pi](https://github.com/earendil-works/pi) coding agent against any repo under your projects folder (default `~/Projects`). Name a project, give it a task — AgentMux spawns a short-lived Pi RPC worker, streams the reply, and exits.
+Talk to **one** foreman agent. It lists your repos, decides which project(s) to touch, and dispatches short-lived [Pi](https://github.com/earendil-works/pi) workers. You stop juggling terminals.
+
+```bash
+am super 看下我有哪些项目
+am super mindmux-app 登录提交后没跳转，帮我查
+```
 
 [![CI](https://github.com/robinv8/agentmux/actions/workflows/ci.yml/badge.svg)](https://github.com/robinv8/agentmux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

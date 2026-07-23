@@ -7,3 +7,5 @@ export * from "./rpc-client.js";
 export * from "./oneshot.js";
 export * from "./pi-path.js";
 export * from "./commander.js";
+export * from "./super-agent.js";
+export * from "./super-rpc.js";

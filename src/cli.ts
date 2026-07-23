@@ -29,6 +29,8 @@ const RESERVED = new Set([
     "s",
     "agents",
     "agent",
+    "jobs",
+    "job",
     "help",
     "--help",
     "-h",
@@ -100,6 +102,40 @@ export async function runCli(argv: string[]): Promise<number> {
                 console.log("");
                 console.log(
                     `Available: ${agents.filter((x) => x.available).length} · Running procs (sum): ${agents.reduce((n, x) => n + x.runningCount, 0)} · Dispatchable workers: ${agents.filter((x) => x.dispatchable).length}`,
+                );
+                return 0;
+            }
+            case "jobs":
+            case "job": {
+                const { listJobs, formatJobsTable } = await import("./jobs.js");
+                const asJson = rest.includes("--json") || rest.includes("-j");
+                const statusArg = rest.find(
+                    (a) =>
+                        a === "running" ||
+                        a === "done" ||
+                        a === "failed" ||
+                        a === "queued",
+                );
+                const jobs = await listJobs({
+                    status: statusArg as
+                        | "running"
+                        | "done"
+                        | "failed"
+                        | "queued"
+                        | undefined,
+                    sinceMs: 48 * 60 * 60 * 1000,
+                });
+                if (asJson) {
+                    console.log(JSON.stringify(jobs, null, 2));
+                    return 0;
+                }
+                console.log(formatJobsTable(jobs));
+                console.log("");
+                const running = jobs.filter((j) => j.status === "running").length;
+                const done = jobs.filter((j) => j.status === "done").length;
+                const failed = jobs.filter((j) => j.status === "failed").length;
+                console.log(
+                    `running=${running} done=${done} failed=${failed} total=${jobs.length}`,
                 );
                 return 0;
             }
@@ -394,7 +430,8 @@ Direct worker (advanced / power users):
 Inspect:
   am list                       Projects under ~/Projects
   am agents                     Local agents (path / running / dispatchable)
-  am agents -a                  Only available on disk
+  am jobs                       Super-dispatched jobs (done/running/failed)
+  am jobs --json                Jobs as JSON (used by the app)
   am status <project>
 
 Examples:

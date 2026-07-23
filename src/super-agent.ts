@@ -8,6 +8,14 @@ import {
     formatLocalAgentsTable,
     scanLocalAgents,
 } from "./local-agents.js";
+import {
+    createJob,
+    formatJobsTable,
+    listJobs,
+    markJobDone,
+    markJobFailed,
+    markJobRunning,
+} from "./jobs.js";
 import type { ProjectEntry } from "./types.js";
 
 export type ChatRole = "user" | "assistant";
@@ -70,20 +78,19 @@ export const SUPER_SYSTEM_PROMPT = `You are AgentMux Super Agent — a single fo
 The user talks ONLY to you. You decide which project(s) need work and you dispatch workers via tools.
 
 Tools:
-- list_projects: see projects under the user's Projects folder
-- list_local_agents: see coding agents installed / running on this machine (grok, codex, kimi, claude, pi, …)
-- run_in_project: run a one-shot coding worker (currently Pi) in a project
+- list_projects: projects under Projects folder
+- list_local_agents: agents installed/running on this machine
+- list_jobs: Super-dispatched jobs (queued/running/done/failed) — USE for "做完了吗/进度"
+- run_in_project: one-shot Pi worker (writes job ledger with final status)
 
 Rules:
 1. Prefer list_projects when the project name is ambiguous.
-2. When the user asks what agents are available, use list_local_agents.
-3. When the user names a project, use run_in_project with a clear, self-contained worker prompt.
-4. You may run multiple projects in one turn if the user asks for multiple things.
-5. After tools finish, summarize results for the user in Chinese if they write Chinese, else match their language.
-6. Do not claim you edited code yourself — workers do. Report what workers returned.
-7. Be honest: only agents with dispatchable=yes can be used as workers today (Pi). Others may be installed/running but not yet wired.
-8. Keep worker prompts concrete: goal, constraints, "do not unrelated refactors".
-9. When the user asks about progress / who is running / 进度 / 谁在跑, call list_local_agents and summarize active sessions (especially Grok session cwds).`;
+2. When asked what agents exist, use list_local_agents.
+3. When asked if a task finished / progress / 进度 / 做完了吗, call list_jobs first. State done/failed/running clearly.
+4. When the user assigns project work, use run_in_project with a concrete worker prompt.
+5. After tools finish, summarize in the user's language; say 已完成/失败/仍在进行 per job.
+6. Only Pi is a dispatchable worker today. External TUI (Grok/Codex/…) process-alive ≠ answer finished.
+7. Keep worker prompts concrete.`;
 
 const TOOLS = [
     {
@@ -110,6 +117,25 @@ const TOOLS = [
                 onlyAvailable: {
                     type: "boolean",
                     description: "If true, only list agents found on disk",
+                },
+            },
+        },
+    },
+    {
+        name: "list_jobs",
+        description:
+            "List Super Agent worker jobs from the on-disk job ledger (authoritative completion status: running/done/failed).",
+        input_schema: {
+            type: "object",
+            properties: {
+                status: {
+                    type: "string",
+                    description:
+                        "Optional filter: queued | running | done | failed",
+                },
+                limit: {
+                    type: "number",
+                    description: "Max jobs to return (default 20)",
                 },
             },
         },
@@ -310,6 +336,42 @@ async function executeTool(
             };
         }
 
+        if (name === "list_jobs") {
+            const status =
+                typeof input.status === "string" ? input.status : undefined;
+            const limit =
+                typeof input.limit === "number" && input.limit > 0
+                    ? Math.min(input.limit, 50)
+                    : 20;
+            let jobs = await listJobs({
+                status: status as
+                    | "queued"
+                    | "running"
+                    | "done"
+                    | "failed"
+                    | undefined,
+                sinceMs: 48 * 60 * 60 * 1000,
+            });
+            jobs = jobs.slice(0, limit);
+            const compact = jobs.map((j) => ({
+                id: j.id,
+                status: j.status,
+                kind: j.kind,
+                project: j.project,
+                summary: (j.summary || j.error || j.message || "").slice(0, 200),
+                updatedAt: j.updatedAt,
+                finishedAt: j.finishedAt,
+            }));
+            return {
+                text:
+                    `Jobs (${jobs.length}):\n` +
+                    formatJobsTable(jobs) +
+                    "\n\nJSON:\n" +
+                    JSON.stringify(compact, null, 2),
+                isError: false,
+            };
+        }
+
         if (name === "run_in_project") {
             const project =
                 typeof input.project === "string" ? input.project : "";
@@ -333,19 +395,35 @@ async function executeTool(
                     isError: true,
                 };
             }
+
+            const job = await createJob({
+                kind: "run_in_project",
+                toolName: "run_in_project",
+                project: target.id,
+                message,
+                status: "running",
+            });
+            await markJobRunning(job.id);
+
             const result = await runWorker({
                 projectQuery: target.id,
                 message,
                 projects,
             });
             if (!result.ok) {
+                const err = result.error ?? "unknown";
+                await markJobFailed(job.id, err);
                 return {
-                    text: `Worker failed in ${target.id}: ${result.error ?? "unknown"}`,
+                    text: `Worker FAILED in ${target.id} (job ${job.id}): ${err}`,
                     isError: true,
                 };
             }
+            const summary =
+                result.assistantText?.trim() ||
+                "(worker finished with empty text)";
+            await markJobDone(job.id, summary);
             return {
-                text: `Worker finished in ${target.id}:\n${result.assistantText ?? "(no text)"}`,
+                text: `Worker DONE in ${target.id} (job ${job.id}):\n${summary}`,
                 isError: false,
             };
         }

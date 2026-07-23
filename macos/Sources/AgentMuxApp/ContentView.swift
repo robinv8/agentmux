@@ -21,7 +21,7 @@ struct ContentView: View {
     private var activeAgentsRail: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("活跃 Agents")
+                Text("任务进度")
                     .font(.headline)
                 Spacer()
                 Button {
@@ -47,9 +47,9 @@ struct ContentView: View {
                     Image(systemName: "waveform.path.ecg")
                         .font(.system(size: 28))
                         .foregroundStyle(.tertiary)
-                    Text("暂无活跃 agent")
+                    Text("暂无任务")
                         .font(.subheadline.weight(.medium))
-                    Text("在中间对话里派活，或等本机 Grok/Codex/Kimi 启动后会出现在这里。\n也可以问：「现在有哪些在跑？」")
+                    Text("派活后这里显示进行中/已完成。\n也可问：「做完了吗？」")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -69,7 +69,7 @@ struct ContentView: View {
             }
 
             Divider()
-            Text("中间对话可问进度 · 左侧只显示进行中的 agent/任务")
+            Text("完成状态以 jobs 台账为准 · 每 2s 刷新")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(10)

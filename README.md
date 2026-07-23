@@ -14,8 +14,10 @@ No second terminal. No manual worker registration for the common path.
 Running coding agents across many repos usually means a grid of tabs and constant context switching. AgentMux collapses the happy path to:
 
 ```bash
-agentmux mindmux-app Fix the login form validation
+am mindmux-app Fix the login form validation
 ```
+
+(`am` is the short alias of `agentmux`.)
 
 ## Requirements
 
@@ -33,11 +35,29 @@ git clone https://github.com/robinv8/agentmux.git
 cd agentmux
 ```
 
-Optional global alias:
+Put both commands on your `PATH` (recommended):
 
 ```bash
-# zsh/bash
-alias agentmux='bun /path/to/agentmux/bin/agentmux.js'
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/bin/agentmux.js" ~/.local/bin/agentmux
+ln -sf "$(pwd)/bin/agentmux.js" ~/.local/bin/am
+chmod +x bin/agentmux.js
+# ensure ~/.local/bin is on PATH, then:
+am list
+```
+
+Or shell aliases:
+
+```bash
+# ~/.zshrc
+alias agentmux='bun ~/Projects/agentmux/bin/agentmux.js'
+alias am='bun ~/Projects/agentmux/bin/agentmux.js'
+```
+
+When published to npm, both bins ship together:
+
+```bash
+npm install -g agentmux   # provides `agentmux` and `am`
 ```
 
 ## Usage
@@ -46,19 +66,19 @@ alias agentmux='bun /path/to/agentmux/bin/agentmux.js'
 
 ```bash
 # List projects under ~/Projects
-agentmux list
+am list
 
 # Run an agent in a project (spawn → prompt → stream → exit)
-agentmux mindmux-app Fix the login form validation
+am mindmux-app Fix the login form validation
 
 # Explicit form (same behavior)
-agentmux run AIDesignPrompt Run bun test schema/goal and fix failures
+am run AIDesignPrompt Run bun test schema/goal and fix failures
 ```
 
 ### Interactive chat
 
 ```bash
-agentmux chat
+am chat
 # AgentMux> list
 # AgentMux> mindmux-app add a loading skeleton to the home page
 # AgentMux> /quit
@@ -69,11 +89,11 @@ agentmux chat
 Only if you want a persistent worker you can `dispatch` into repeatedly:
 
 ```bash
-agentmux serve my-app          # keep Pi RPC up + register socket
-agentmux dispatch my-app "…"   # send to that registered worker
+am serve my-app          # keep Pi RPC up + register socket
+am dispatch my-app "…"   # send to that registered worker
 ```
 
-Most people never need this — prefer `agentmux <project> <message>`.
+Most people never need this — prefer `am <project> <message>`.
 
 ## Configuration
 

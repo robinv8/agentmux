@@ -23,7 +23,8 @@
     "orchestration"
   ],
   "bin": {
-    "agentmux": "./bin/agentmux.js"
+    "agentmux": "./bin/agentmux.js",
+    "am": "./bin/agentmux.js"
   },
   "exports": {
     ".": "./src/index.ts",

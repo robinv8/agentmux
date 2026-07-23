@@ -2,10 +2,10 @@
 /**
  * AgentMux CLI — multi-project Pi commander.
  *
- * Primary:
- *   agentmux <project> <message...>
- *   agentmux list
- *   agentmux chat
+ * Primary (also available as `am`):
+ *   am <project> <message...>
+ *   am list
+ *   am chat
  */
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

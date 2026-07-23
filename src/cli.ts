@@ -62,7 +62,7 @@ export async function runCli(argv: string[]): Promise<number> {
             case "status": {
                 const projectQuery = rest[0];
                 if (!projectQuery) {
-                    console.error("Usage: agentmux status <project>");
+                    console.error("Usage: am status <project>");
                     return 2;
                 }
                 const result = await statusForProject(config, projectQuery);
@@ -94,7 +94,7 @@ export async function runCli(argv: string[]): Promise<number> {
                 const message = rest.slice(1).join(" ").trim();
                 if (!projectQuery || !message) {
                     console.error(
-                        "Usage: agentmux run <project> <message...>\n   or: agentmux <project> <message...>",
+                        "Usage: am run <project> <message...>\n   or: am <project> <message...>",
                     );
                     return 2;
                 }
@@ -106,7 +106,7 @@ export async function runCli(argv: string[]): Promise<number> {
                 const message = rest.slice(1).join(" ").trim();
                 if (!projectQuery || !message) {
                     console.error(
-                        "Usage: agentmux dispatch <project> <message...>",
+                        "Usage: am dispatch <project> <message...>",
                     );
                     return 2;
                 }
@@ -119,7 +119,7 @@ export async function runCli(argv: string[]): Promise<number> {
                 // Advanced: keep a long-lived worker process
                 const projectQuery = rest[0];
                 if (!projectQuery) {
-                    console.error("Usage: agentmux serve <project>");
+                    console.error("Usage: am serve <project>");
                     return 2;
                 }
                 const { record, bridge } = await registerWorker(
@@ -147,7 +147,7 @@ export async function runCli(argv: string[]): Promise<number> {
                 const projectQuery = rest[0];
                 if (!projectQuery) {
                     console.error(
-                        "Usage: agentmux register <project> --socket <path> [--pid N]",
+                        "Usage: am register <project> --socket <path> [--pid N]",
                     );
                     return 2;
                 }
@@ -176,7 +176,7 @@ export async function runCli(argv: string[]): Promise<number> {
                 // Single token that looks like a project but no message
                 if (!RESERVED.has(cmd) && rest.length === 0) {
                     console.error(
-                        `Missing message. Try:\n  agentmux ${cmd} <what you want done>`,
+                        `Missing message. Try:\n  am ${cmd} <what you want done>`,
                     );
                     return 2;
                 }
@@ -278,27 +278,29 @@ async function runRepl(
 }
 
 function printHelp(): void {
+    // Prefer short form in help so muscle memory sticks.
     console.log(`AgentMux — one commander, many local projects (Pi RPC)
+Command: am  (alias of agentmux)
 
 Primary (no worker terminal needed):
-  agentmux <project> <message...>     Run a one-shot agent in that project
-  agentmux run <project> <message...> Same as above
-  agentmux chat                       Interactive loop
+  am <project> <message...>     Run a one-shot agent in that project
+  am run <project> <message...> Same as above
+  am chat                       Interactive loop
 
 Inspect:
-  agentmux list                       Projects under ~/Projects + status
-  agentmux status <project>
+  am list                       Projects under ~/Projects + status
+  am status <project>
 
 Advanced (long-lived workers):
-  agentmux serve <project>            Keep a Pi RPC worker up
-  agentmux dispatch <project> <msg>   Prompt a registered long-lived worker
-  agentmux register <project> --socket PATH [--pid N]
+  am serve <project>            Keep a Pi RPC worker up
+  am dispatch <project> <msg>   Prompt a registered long-lived worker
+  am register <project> --socket PATH [--pid N]
 
 Examples:
-  agentmux list
-  agentmux mindmux-app Fix the login form validation
-  agentmux run AIDesignPrompt Run bun test schema/goal and fix failures
-  agentmux chat
+  am list
+  am mindmux-app Fix the login form validation
+  am run AIDesignPrompt Run bun test schema/goal and fix failures
+  am chat
 
 Env:
   AGENTMUX_PROJECTS_ROOT   default: ~/Projects

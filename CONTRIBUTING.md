@@ -7,14 +7,15 @@ Thanks for helping improve **AgentMux**.
 ```bash
 git clone https://github.com/robinv8/agentmux.git
 cd agentmux
+bun install          # pulls bundled @earendil-works/pi-coding-agent
 bun test
 bun run bin/agentmux.js list
 ```
 
 Requirements:
 
-- [Bun](https://bun.sh) (preferred for tests and the CLI entry)
-- Optional: [Pi coding agent](https://github.com/earendil-works/pi) for live one-shot / serve
+- [Bun](https://bun.sh) (CLI + tests)
+- Pi is a **package dependency** — do not document a separate global Pi install
 
 ## Guidelines
 

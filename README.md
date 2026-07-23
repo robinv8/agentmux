@@ -2,98 +2,68 @@
 
 **One command. Right project. Done.**
 
-AgentMux is a local multi-project commander for [Pi](https://github.com/earendil-works/pi). Point it at a folder of repos (default `~/Projects`), name a project, give it a task — it spins up a short-lived Pi RPC worker, runs the prompt there, streams the reply, and exits.
-
-No second terminal. No manual worker registration for the common path.
+AgentMux runs a [Pi](https://github.com/earendil-works/pi) coding agent against any repo under your projects folder (default `~/Projects`). Name a project, give it a task — AgentMux spawns a short-lived Pi RPC worker, streams the reply, and exits.
 
 [![CI](https://github.com/robinv8/agentmux/actions/workflows/ci.yml/badge.svg)](https://github.com/robinv8/agentmux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Why
-
-Running coding agents across many repos usually means a grid of tabs and constant context switching. AgentMux collapses the happy path to:
+## Install (one command)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/robinv8/agentmux/main/scripts/install.sh | bash
+```
+
+This will:
+
+1. Install [Bun](https://bun.sh) if missing  
+2. `bun install -g github:robinv8/agentmux`  
+3. Pull **`@earendil-works/pi-coding-agent` as a dependency** — you do **not** install Pi separately  
+
+After install:
+
+```bash
+am list
 am mindmux-app Fix the login form validation
 ```
 
 (`am` is the short alias of `agentmux`.)
 
-## Requirements
-
-- [Bun](https://bun.sh) (recommended) or Node 20+
-- [Pi coding agent](https://github.com/earendil-works/pi) on your `PATH` for live runs:
+### Other install options
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-```
+# Already have Bun
+bun install -g github:robinv8/agentmux
 
-## Install
-
-```bash
+# From a local clone (dev)
 git clone https://github.com/robinv8/agentmux.git
 cd agentmux
+bun install
+bun link          # puts am / agentmux on PATH via Bun
 ```
 
-Put both commands on your `PATH` (recommended):
+Override install source for the curl script:
 
 ```bash
-mkdir -p ~/.local/bin
-ln -sf "$(pwd)/bin/agentmux.js" ~/.local/bin/agentmux
-ln -sf "$(pwd)/bin/agentmux.js" ~/.local/bin/am
-chmod +x bin/agentmux.js
-# ensure ~/.local/bin is on PATH, then:
-am list
+AGENTMUX_REF=github:robinv8/agentmux#main curl -fsSL … | bash
 ```
 
-Or shell aliases:
-
-```bash
-# ~/.zshrc
-alias agentmux='bun ~/Projects/agentmux/bin/agentmux.js'
-alias am='bun ~/Projects/agentmux/bin/agentmux.js'
-```
-
-When published to npm, both bins ship together:
-
-```bash
-npm install -g agentmux   # provides `agentmux` and `am`
-```
+Optional: force a different Pi binary with `PI_BIN=/path/to/pi` (default uses the one bundled with AgentMux).
 
 ## Usage
 
-### Primary: one-shot run
-
 ```bash
-# List projects under ~/Projects
-am list
-
-# Run an agent in a project (spawn → prompt → stream → exit)
-am mindmux-app Fix the login form validation
-
-# Explicit form (same behavior)
-am run AIDesignPrompt Run bun test schema/goal and fix failures
+am list                                 # projects under ~/Projects
+am mindmux-app Fix the login form       # one-shot agent in that project
+am run AIDesignPrompt Run the unit tests
+am chat                                 # interactive loop
 ```
 
-### Interactive chat
+Advanced (long-lived workers — optional):
 
 ```bash
-am chat
-# AgentMux> list
-# AgentMux> mindmux-app add a loading skeleton to the home page
-# AgentMux> /quit
+am serve my-app
+am dispatch my-app "follow-up"
 ```
-
-### Advanced: long-lived workers
-
-Only if you want a persistent worker you can `dispatch` into repeatedly:
-
-```bash
-am serve my-app          # keep Pi RPC up + register socket
-am dispatch my-app "…"   # send to that registered worker
-```
-
-Most people never need this — prefer `am <project> <message>`.
 
 ## Configuration
 
@@ -102,26 +72,25 @@ Most people never need this — prefer `am <project> <message>`.
 | `AGENTMUX_PROJECTS_ROOT` | `~/Projects` |
 | `AGENTMUX_REGISTRY` | `~/.pi/agent/workers.json` |
 | `AGENTMUX_SOCKETS` | `~/.pi/agent/worker-sockets` |
-| `PI_BIN` | `pi` |
+| `PI_BIN` | bundled `@earendil-works/pi-coding-agent` |
 
 ## Architecture
 
 ```
-agentmux <project> <message>
+am <project> <message>
         │
         ├─ discover project under Projects root
-        ├─ spawn: pi --mode rpc --no-session  (cwd = project)
+        ├─ spawn bundled pi --mode rpc --no-session  (cwd = project)
         ├─ JSONL prompt on stdin
         ├─ stream text_delta → your terminal
         └─ wait agent_settled → exit
 ```
 
-Long-lived mode (optional) bridges Pi RPC to a Unix socket and records it in the registry for `dispatch`.
-
 ## As a Pi extension
 
 ```bash
-cd /path/to/agentmux
+pi -e $(bun pm ls -g --all 2>/dev/null; echo)/extensions/commander.ts
+# or from a clone:
 pi -e ./extensions/commander.ts
 ```
 
@@ -130,13 +99,14 @@ Tools: `list_projects`, `worker_status`, `run_in_project`.
 ## Library
 
 ```ts
-import { discoverProjects, runOneShot } from "./src/index.ts";
+import { discoverProjects, runOneShot, resolvePiBinary } from "agentmux";
 
-const projects = await discoverProjects({ projectsRoot: "~/Projects" });
+const projects = await discoverProjects({ projectsRoot: `${process.env.HOME}/Projects` });
 const result = await runOneShot({
   projectQuery: "my-app",
   message: "summarize README",
   projects,
+  piBinary: resolvePiBinary(),
 });
 ```
 
@@ -146,13 +116,10 @@ const result = await runOneShot({
 bun test
 ```
 
-Unit tests cover discovery, registry, status, socket dispatch, and one-shot RPC with a mock Pi process (no live `pi` binary required).
-
 ## Non-goals
 
-- Keystroke injection into Grok / Codex / Kimi TUIs
-- Cloud / multi-user orchestration
-- Full dual-way chat mux of every token into a single super-model (roadmap)
+- Keystroke injection into Grok / Codex / Kimi TUIs  
+- Cloud / multi-user orchestration  
 
 ## Contributing
 
@@ -164,4 +131,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security: [SECURITY.md](SECURITY.md).
 
 ## Acknowledgments
 
-Workers speak [Pi](https://github.com/earendil-works/pi) RPC. Pi is a separate project.
+Workers speak [Pi](https://github.com/earendil-works/pi) RPC. Pi is bundled as a dependency; credit to the Pi maintainers.

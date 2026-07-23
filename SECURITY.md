@@ -24,3 +24,6 @@ Do not file public issues for unfixed security problems.
   `AGENTMUX_SOCKETS`, or API keys for model providers.
 - Worker processes inherit your user permissions; assume any registered worker
   can run arbitrary shell/tool actions allowed by Pi.
+- The install script clones into `~/.agentmux` and runs `npm install
+  --ignore-scripts` by default so dependency lifecycle scripts are not executed
+  unless you change that path yourself.

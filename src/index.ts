@@ -5,4 +5,5 @@ export * from "./status.js";
 export * from "./dispatch.js";
 export * from "./rpc-client.js";
 export * from "./oneshot.js";
+export * from "./pi-path.js";
 export * from "./commander.js";

@@ -306,7 +306,10 @@ Env:
   AGENTMUX_PROJECTS_ROOT   default: ~/Projects
   AGENTMUX_REGISTRY        default: ~/.pi/agent/workers.json
   AGENTMUX_SOCKETS         default: ~/.pi/agent/worker-sockets
-  PI_BIN                   pi binary (default: pi)
+  PI_BIN                   override Pi binary (default: bundled with AgentMux)
+
+Install:
+  curl -fsSL https://raw.githubusercontent.com/robinv8/agentmux/main/scripts/install.sh | bash
 `);
 }
 

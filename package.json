@@ -1,6 +1,6 @@
 {
   "name": "agentmux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AgentMux — one command to run a Pi coding agent in any local project",
   "type": "module",
   "license": "MIT",
@@ -20,7 +20,8 @@
     "multi-project",
     "rpc",
     "cli",
-    "orchestration"
+    "orchestration",
+    "agentmux"
   ],
   "bin": {
     "agentmux": "./bin/agentmux.js",
@@ -34,6 +35,7 @@
     "bin",
     "src",
     "extensions",
+    "scripts/install.sh",
     "README.md",
     "LICENSE"
   ],
@@ -43,8 +45,11 @@
     "status": "bun run bin/agentmux.js status",
     "dispatch": "bun run bin/agentmux.js dispatch"
   },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.81.1"
+  },
   "engines": {
-    "node": ">=20"
+    "bun": ">=1.1.0"
   },
   "pi": {
     "extensions": ["./extensions/commander.ts"]

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ProjectEntry } from "./types.js";
 import { resolveProjectTarget } from "./discovery.js";
+import { resolvePiBinary } from "./pi-path.js";
 
 export interface OneShotResult {
     ok: boolean;
@@ -96,7 +97,7 @@ export async function runOneShot(
         };
     }
 
-    const piBinary = options.piBinary ?? process.env.PI_BIN ?? "pi";
+    const piBinary = options.piBinary ?? resolvePiBinary();
     const spawner = options.spawner ?? defaultPiSpawner;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -112,7 +113,7 @@ export async function runOneShot(
             ok: false,
             projectId: project.id,
             message,
-            error: `Failed to start Pi: ${err instanceof Error ? err.message : String(err)}. Install: npm i -g --ignore-scripts @earendil-works/pi-coding-agent`,
+            error: `Failed to start Pi (${piBinary}): ${err instanceof Error ? err.message : String(err)}. Reinstall AgentMux so the bundled Pi dependency is present.`,
             eventCount: 0,
         };
     }

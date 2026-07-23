@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+package-lock.json
+bun.lock
+bun.lockb
 
 # Build / caches
 dist/

@@ -33,6 +33,7 @@ import type {
     WorkerRecord,
     WorkerStatus,
 } from "./types.js";
+import { resolvePiBinary } from "./pi-path.js";
 
 export interface CommanderConfig {
     projectsRoot: string;
@@ -63,7 +64,7 @@ export function defaultCommanderConfig(
             path.join(home, ".pi", "agent", "worker-sockets"),
         rpcClient: overrides.rpcClient ?? new SocketPiRpcClient(),
         processProbe: overrides.processProbe ?? defaultProcessProbe,
-        piBinary: overrides.piBinary ?? process.env.PI_BIN ?? "pi",
+        piBinary: overrides.piBinary ?? resolvePiBinary(),
         requireProjectMarker: overrides.requireProjectMarker ?? false,
     };
 }

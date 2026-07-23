@@ -78,7 +78,8 @@ Rules:
 5. After tools finish, summarize results for the user in Chinese if they write Chinese, else match their language.
 6. Do not claim you edited code yourself — workers do. Report what workers returned.
 7. Be honest: only agents with dispatchable=yes can be used as workers today (Pi). Others may be installed/running but not yet wired.
-8. Keep worker prompts concrete: goal, constraints, "do not unrelated refactors".`;
+8. Keep worker prompts concrete: goal, constraints, "do not unrelated refactors".
+9. When the user asks about progress / who is running / 进度 / 谁在跑, call list_local_agents and summarize active sessions (especially Grok session cwds).`;
 
 const TOOLS = [
     {

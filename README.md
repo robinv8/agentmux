@@ -27,8 +27,7 @@ This will:
 After install:
 
 ```bash
-am list
-am mindmux-app Fix the login form validation
+am super 看下我有哪些项目
 ```
 
 (`am` is the short alias of `agentmux`.)
@@ -57,17 +56,18 @@ Optional: force a different Pi binary with `PI_BIN=/path/to/pi` (default uses th
 ## Usage
 
 ```bash
-am list                                 # projects under ~/Projects
-am mindmux-app Fix the login form       # one-shot agent in that project
-am run AIDesignPrompt Run the unit tests
-am chat                                 # interactive loop
+am super                      # Super Agent chat (primary)
+am super 看下我有哪些项目
+am super mindmux-app 登录有问题，帮我查
+
+am list                       # raw inventory
+am mindmux-app Fix login      # direct worker (skip Super Agent)
 ```
 
-Advanced (long-lived workers — optional):
+macOS Super Agent chat app:
 
 ```bash
-am serve my-app
-am dispatch my-app "follow-up"
+cd macos && ./scripts/run-app.sh
 ```
 
 ## Configuration
@@ -82,13 +82,9 @@ am dispatch my-app "follow-up"
 ## Architecture
 
 ```
-am <project> <message>
-        │
-        ├─ discover project under Projects root
-        ├─ spawn bundled pi --mode rpc --no-session  (cwd = project)
-        ├─ JSONL prompt on stdin
-        ├─ stream text_delta → your terminal
-        └─ wait agent_settled → exit
+you ──chat──► Super Agent (tools)
+                 ├─ list_projects
+                 └─ run_in_project ──► Pi worker one-shot in that repo
 ```
 
 ## As a Pi extension

@@ -7,203 +7,154 @@ struct ContentView: View {
 
     var body: some View {
         HSplitView {
-            bossRail
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+            workbenchRail
+                .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
             chatColumn
                 .frame(minWidth: 440)
         }
         .onAppear { model.bootstrap() }
-        .frame(minWidth: 960, minHeight: 600)
+        .frame(minWidth: 980, minHeight: 620)
     }
 
-    // MARK: - Left: 老大视角 — 小弟花名册 + 任务
+    // MARK: - Left: today's stations
 
-    private var bossRail: some View {
+    private var workbenchRail: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AgentMux 老大")
+                    Text(model.workbenchTitle)
                         .font(.headline)
-                    Text(model.brothersStatus)
+                    Text(model.railStatus)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    model.refreshRoster()
-                } label: {
+                Button { model.refreshWorkbench() } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
-                .help("刷新小弟与任务")
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(14)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    brothersSection
-                    tasksSection
+                VStack(alignment: .leading, spacing: 12) {
+                    if model.stations.isEmpty {
+                        emptyStations
+                    } else {
+                        ForEach(model.stations) { st in
+                            stationCard(st)
+                        }
+                    }
+
+                    brothersStrip
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
             }
 
             Divider()
-            Text("点小弟可填「用 xxx」· 任务以 jobs 台账为准")
+            Text("工位=今日项目 · 点卡片聚焦对话 · 审批会显示「等你」")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(10)
         }
         .background(Color.primary.opacity(0.025))
-        .accessibilityIdentifier("agentmux.boss.rail")
     }
 
-    private var brothersSection: some View {
+    private var emptyStations: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("小弟（可指挥）")
+            Text("还没有今日工位")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if model.brothers.isEmpty {
-                Text("扫描中…")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                ForEach(model.brothers) { b in
-                    brotherCard(b)
-                }
-            }
-        }
-    }
-
-    private func brotherCard(_ b: WorkerBrother) -> some View {
-        Button {
-            guard b.available else { return }
-            model.suggestDispatch(backend: b.backendId)
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(b.available ? Color.green.opacity(0.2) : Color.gray.opacity(0.15))
-                        .frame(width: 32, height: 32)
-                    Text(String(b.backendId.prefix(1)).uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(b.available ? .green : .secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(b.backendId)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        if b.available {
-                            Text("在岗")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.green)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(Color.green.opacity(0.12))
-                                .clipShape(Capsule())
-                        } else {
-                            Text("未安装")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(b.name)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if let path = b.path {
-                        Text(path)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                Spacer(minLength: 0)
-                if b.available {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .background(Color.primary.opacity(b.available ? 0.05 : 0.02))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .opacity(b.available ? 1 : 0.55)
-        }
-        .buttonStyle(.plain)
-        .disabled(!b.available)
-        .help(b.available ? "点击：在输入框填入「用 \(b.backendId)」" : "本机未检测到")
-    }
-
-    private var tasksSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("任务进度")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(model.activityStatus)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if model.activeActivities.isEmpty {
-                Text("还没有派活。对老大说：用 grok 读 agentmux 的 package 版本")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                ForEach(model.activeActivities) { a in
-                    taskCard(a)
-                }
-            }
-        }
-    }
-
-    private func taskCard(_ a: ActiveActivity) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(dotColor(a))
-                    .frame(width: 9, height: 9)
-                Text(a.title)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(statusLabel(a))
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(dotColor(a))
-            }
-            Text(a.subtitle)
+            Text("对老大说：\n「今天要同时处理 agentmux 和 md-converter」")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let detail = a.detail, !detail.isEmpty {
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-            HStack(spacing: 6) {
-                chip("小弟 \(a.agentId)")
-                if let p = a.project { chip(p) }
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.05))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(dotColor(a).opacity(0.25), lineWidth: 1)
-        )
+    }
+
+    private func stationCard(_ st: WorkbenchStation) -> some View {
+        Button {
+            model.focusStation(st)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Circle()
+                        .fill(statusColor(st.status))
+                        .frame(width: 10, height: 10)
+                    Text(st.project ?? "未命名")
+                        .font(.headline)
+                    Spacer()
+                    Text(statusText(st.status))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(statusColor(st.status))
+                }
+
+                HStack(spacing: 6) {
+                    chip(st.backend.map { "小弟 \($0)" } ?? "未指定小弟")
+                    if st.status == "ready" { chip("就绪") }
+                    if st.status == "waiting_user" { chip("等你") }
+                }
+
+                if let task = st.task, !task.isEmpty {
+                    Text(task)
+                        .font(.caption)
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .lineLimit(4)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    Text("尚未布置任务")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let q = st.pendingQuestion, st.status == "waiting_user" {
+                    Text("❓ \(q)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                if let summary = st.summary, st.status == "done" {
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+                if let err = st.error, st.status == "failed" {
+                    Text(err)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(statusColor(st.status).opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var brothersStrip: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("可指挥的小弟")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            FlowBrothers(brothers: model.brothers.filter(\.available)) { b in
+                model.suggestBackend(b.backendId)
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func chip(_ text: String) -> some View {
@@ -215,25 +166,30 @@ struct ContentView: View {
             .clipShape(Capsule())
     }
 
-    private func dotColor(_ a: ActiveActivity) -> Color {
-        if a.subtitle.contains("失败") { return .red }
-        switch a.status {
-        case .running: return .orange
-        case .done: return .green
-        case .idle: return .secondary
+    private func statusColor(_ s: String) -> Color {
+        switch s {
+        case "running": return .orange
+        case "waiting_user": return .purple
+        case "done": return .green
+        case "failed": return .red
+        case "ready": return .blue
+        default: return .secondary
         }
     }
 
-    private func statusLabel(_ a: ActiveActivity) -> String {
-        if a.subtitle.contains("失败") { return "失败" }
-        switch a.status {
-        case .running: return "进行中"
-        case .done: return "完成"
-        case .idle: return "空闲"
+    private func statusText(_ s: String) -> String {
+        switch s {
+        case "running": return "进行中"
+        case "waiting_user": return "等你"
+        case "done": return "完成"
+        case "failed": return "失败"
+        case "ready": return "就绪"
+        case "empty": return "待布置"
+        default: return s
         }
     }
 
-    // MARK: - Center chat
+    // MARK: - Chat
 
     private var chatColumn: some View {
         VStack(spacing: 0) {
@@ -248,7 +204,7 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("对话 · 只跟老大说")
+                Text("对话")
                     .font(.headline)
                 Text(model.status)
                     .font(.caption)
@@ -256,10 +212,7 @@ struct ContentView: View {
             }
             Spacer()
             if let err = model.errorBanner {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
+                Text(err).font(.caption).foregroundStyle(.red).lineLimit(2)
             }
             Button("Clear") { model.clearChat() }
                 .buttonStyle(.borderless)
@@ -273,8 +226,7 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(model.lines) { line in
-                        chatBubble(line)
-                            .id(line.id)
+                        chatBubble(line).id(line.id)
                     }
                 }
                 .padding(16)
@@ -286,12 +238,11 @@ struct ContentView: View {
             }
         }
         .background(Color.primary.opacity(0.03))
-        .accessibilityIdentifier("agentmux.chat.scroll")
     }
 
     private func chatBubble(_ line: ChatLine) -> some View {
         HStack {
-            if line.kind == .user { Spacer(minLength: 48) }
+            if line.kind == .user { Spacer(minLength: 40) }
             VStack(alignment: .leading, spacing: 4) {
                 Text(label(for: line.kind))
                     .font(.caption2.weight(.semibold))
@@ -299,20 +250,20 @@ struct ContentView: View {
                 Text(line.text)
                     .font(line.kind == .tool ? .system(.caption, design: .monospaced) : .body)
                     .textSelection(.enabled)
-                    .frame(maxWidth: 580, alignment: .leading)
+                    .frame(maxWidth: 560, alignment: .leading)
             }
             .padding(10)
             .background(bubbleColor(for: line.kind))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            if line.kind != .user { Spacer(minLength: 48) }
+            if line.kind != .user { Spacer(minLength: 40) }
         }
     }
 
     private func label(for kind: ChatLine.Kind) -> String {
         switch kind {
         case .user: return "You"
-        case .assistant: return "老大 Super Agent"
-        case .tool: return "调度小弟"
+        case .assistant: return "老大"
+        case .tool: return "调度"
         case .system: return "系统"
         case .error: return "错误"
         }
@@ -330,48 +281,50 @@ struct ContentView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("指挥老大 · 例：用 codex 在 agentmux 总结 README / 做完了吗？")
+            Text("布置工位 / 开干 / 回答审批")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            // Quick brother chips
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(model.brothers.filter(\.available)) { b in
-                        Button("用 \(b.backendId)") {
-                            model.suggestDispatch(backend: b.backendId)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-            }
 
             FocusableTextView(
                 text: $model.draft,
                 isEditable: !model.isBusy,
-                placeholder: "对老大说话…",
+                placeholder: "今天做 agentmux 和 md-converter… / 开干 / 关于 xxx：可以改",
                 onSubmit: { model.send() }
             )
-            .frame(minHeight: 72, maxHeight: 120)
-            .accessibilityIdentifier("agentmux.chat.input")
+            .frame(minHeight: 80, maxHeight: 140)
 
             HStack {
-                Button(model.isBusy ? "调度中…" : "发送") {
-                    model.send()
-                }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(
-                    model.isBusy
-                        || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
+                Button(model.isBusy ? "处理中…" : "发送") { model.send() }
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .disabled(
+                        model.isBusy
+                            || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 Spacer()
-                Text("⌘↩ 发送")
+                Text("⌘↩")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
         .padding(16)
-        .accessibilityIdentifier("agentmux.chat.composer")
+    }
+}
+
+/// Simple horizontal wrap of brother chips
+struct FlowBrothers: View {
+    let brothers: [WorkerBrother]
+    let onTap: (WorkerBrother) -> Void
+
+    var body: some View {
+        // Lazy: single row scroll is enough for 5 backends
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(brothers) { b in
+                    Button(b.backendId) { onTap(b) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+            }
+        }
     }
 }

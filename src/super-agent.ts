@@ -13,6 +13,7 @@ import {
     listDispatchableBackends,
     normalizeBackendId,
 } from "./workers/index.js";
+import * as workbench from "./workbench.js";
 
 export type ChatRole = "user" | "assistant";
 
@@ -68,25 +69,26 @@ export interface SuperAgentConfig {
     discover?: typeof discoverProjects;
 }
 
-export const SUPER_SYSTEM_PROMPT = `You are AgentMux Super Agent — a single foreman that controls coding workers across many local projects.
+export const SUPER_SYSTEM_PROMPT = `You are AgentMux — the boss. User talks only to you.
 
-The user talks ONLY to you. You decide which project(s) need work and you dispatch workers via tools.
+## Morning workbench flow (PRIMARY)
+1. User says they will work on projects A,B,C today → call workbench_set_projects
+2. Assign little brothers (backends) per project → workbench_assign (pi|claude|codex|grok|kimi). Ask user if unclear; suggest available backends via list_local_agents.
+3. Capture each project's task → workbench_set_task
+4. When user says start / 开干 / 回车干活 → workbench_start (runs ready stations in PARALLEL)
+5. Progress → workbench_status (and list_jobs). Waiting on user → stations with waiting_user + pendingQuestion
+6. User answers a blocked station → workbench_answer then offer to workbench_start that project again
 
-Tools:
-- list_projects: projects under Projects folder
-- list_local_agents: agents installed/running on this machine
-- list_jobs: Super-dispatched jobs (queued/running/done/failed) — USE for "做完了吗/进度"
-- run_in_project: dispatch a worker CLI into a project (backend: pi|claude|codex|grok|kimi; default auto)
+## Also available
+- list_projects / list_local_agents / list_jobs
+- run_in_project for one-off tasks outside the workbench
 
-You are the boss. Available little brothers are local CLIs that AgentMux can spawn headlessly.
-Rules:
-1. Prefer list_projects when the project name is ambiguous.
-2. When asked what agents/workers exist, use list_local_agents.
-3. When asked if a task finished / progress / 进度 / 做完了吗, call list_jobs first.
-4. When assigning work, use run_in_project with a concrete worker prompt. Optionally set backend when user asks for a specific brother (codex/claude/grok/kimi/pi).
-5. After tools finish, summarize; say 已完成/失败/仍在进行 per job and which backend ran.
-6. Prefer backends that are available; if user names an unavailable backend, say so and offer another.
-7. Keep worker prompts concrete.`;
+## Rules
+- Keep the workbench as the source of "today's stations" in the UI.
+- When you need a decision/approval, use workbench_ask so the station shows 等你.
+- After start, report which stations are running/done/failed.
+- Match user's language (Chinese if they write Chinese).
+- Worker prompts must be self-contained.`;
 
 const TOOLS = [
     {
@@ -139,7 +141,7 @@ const TOOLS = [
     {
         name: "run_in_project",
         description:
-            "Dispatch a headless coding worker CLI into a project directory (boss commanding a little brother). Writes job ledger on completion.",
+            "One-off dispatch (not workbench). Prefer workbench_* for multi-project morning flow.",
         input_schema: {
             type: "object",
             properties: {
@@ -159,6 +161,102 @@ const TOOLS = [
                 },
             },
             required: ["project", "message"],
+        },
+    },
+    {
+        name: "workbench_set_projects",
+        description:
+            "Create/reset today's workbench stations from a list of project names (e.g. A,B,C).",
+        input_schema: {
+            type: "object",
+            properties: {
+                projects: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Project basenames",
+                },
+                title: {
+                    type: "string",
+                    description: "Optional workbench title",
+                },
+            },
+            required: ["projects"],
+        },
+    },
+    {
+        name: "workbench_assign",
+        description: "Bind a little brother (backend) to a workbench station.",
+        input_schema: {
+            type: "object",
+            properties: {
+                project: { type: "string" },
+                backend: {
+                    type: "string",
+                    description: "pi|claude|codex|grok|kimi",
+                },
+            },
+            required: ["project", "backend"],
+        },
+    },
+    {
+        name: "workbench_set_task",
+        description: "Set the task description for a station.",
+        input_schema: {
+            type: "object",
+            properties: {
+                project: { type: "string" },
+                task: { type: "string" },
+            },
+            required: ["project", "task"],
+        },
+    },
+    {
+        name: "workbench_start",
+        description:
+            "Start all ready stations in parallel (or only listed projects). Call when user confirms 开干.",
+        input_schema: {
+            type: "object",
+            properties: {
+                projects: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Optional subset of projects to start",
+                },
+            },
+        },
+    },
+    {
+        name: "workbench_status",
+        description: "Show today's workbench stations and statuses.",
+        input_schema: {
+            type: "object",
+            properties: {},
+        },
+    },
+    {
+        name: "workbench_ask",
+        description:
+            "Mark a station as waiting_user with a question (approval / clarification).",
+        input_schema: {
+            type: "object",
+            properties: {
+                project: { type: "string" },
+                question: { type: "string" },
+            },
+            required: ["project", "question"],
+        },
+    },
+    {
+        name: "workbench_answer",
+        description:
+            "Apply the user's answer to a waiting station (appends into task context).",
+        input_schema: {
+            type: "object",
+            properties: {
+                project: { type: "string" },
+                answer: { type: "string" },
+            },
+            required: ["project", "answer"],
         },
     },
 ] as const;
@@ -385,9 +483,10 @@ async function executeTool(
                 };
             }
 
-            // Surface available brothers when useful
             const brothers = await listDispatchableBackends();
-            const available = brothers.filter((b) => b.available).map((b) => b.id);
+            const available = brothers
+                .filter((b) => b.available)
+                .map((b) => b.id);
 
             try {
                 const result = await dispatchWorker({
@@ -418,6 +517,86 @@ async function executeTool(
                     isError: true,
                 };
             }
+        }
+
+        if (name === "workbench_set_projects") {
+            const projects = Array.isArray(input.projects)
+                ? input.projects.map(String)
+                : [];
+            if (projects.length === 0) {
+                return { text: "projects array required", isError: true };
+            }
+            const wb = await workbench.setProjects(projects, {
+                projectsRoot: config.projectsRoot,
+                title:
+                    typeof input.title === "string"
+                        ? input.title
+                        : "今日工作台",
+            });
+            return {
+                text: workbench.formatWorkbench(wb),
+                isError: false,
+            };
+        }
+
+        if (name === "workbench_assign") {
+            const project = String(input.project ?? "");
+            const backend = String(input.backend ?? "");
+            const wb = await workbench.assignBackend(project, backend);
+            return { text: workbench.formatWorkbench(wb), isError: false };
+        }
+
+        if (name === "workbench_set_task") {
+            const project = String(input.project ?? "");
+            const task = String(input.task ?? "");
+            const wb = await workbench.setTask(project, task);
+            return { text: workbench.formatWorkbench(wb), isError: false };
+        }
+
+        if (name === "workbench_start") {
+            const only = Array.isArray(input.projects)
+                ? input.projects.map(String)
+                : undefined;
+            const { workbench: wb, results } = await workbench.startWork({
+                projectsRoot: config.projectsRoot,
+                onlyProjects: only,
+            });
+            const summary = results
+                .map(
+                    (r) =>
+                        `- ${r.project}: ${r.ok ? "OK" : "FAIL"} ${r.summary.slice(0, 120)}`,
+                )
+                .join("\n");
+            return {
+                text: `${workbench.formatWorkbench(wb)}\n\nResults:\n${summary || "(no stations started — need ready: project+backend+task)"}`,
+                isError: false,
+            };
+        }
+
+        if (name === "workbench_status") {
+            const wb = await workbench.loadWorkbench();
+            return { text: workbench.formatWorkbench(wb), isError: false };
+        }
+
+        if (name === "workbench_ask") {
+            const wb = await workbench.askUser(
+                String(input.project ?? ""),
+                String(input.question ?? ""),
+            );
+            return {
+                text:
+                    workbench.formatWorkbench(wb) +
+                    "\n\n(User must answer in chat; then call workbench_answer + workbench_start)",
+                isError: false,
+            };
+        }
+
+        if (name === "workbench_answer") {
+            const wb = await workbench.answerUser(
+                String(input.project ?? ""),
+                String(input.answer ?? ""),
+            );
+            return { text: workbench.formatWorkbench(wb), isError: false };
         }
 
         return { text: `Unknown tool: ${name}`, isError: true };

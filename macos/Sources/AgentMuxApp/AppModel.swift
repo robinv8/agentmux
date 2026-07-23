@@ -10,17 +10,15 @@ final class AppModel: ObservableObject {
     @Published var projectsRootPath: String
     @Published var errorBanner: String?
 
-    /// 可调度小弟（pi/claude/codex/grok/kimi）
     @Published var brothers: [WorkerBrother] = []
-    /// 任务台账（进行中 / 刚完成）
-    @Published var activeActivities: [ActiveActivity] = []
-    @Published var activityStatus: String = ""
-    @Published var brothersStatus: String = ""
+    @Published var stations: [WorkbenchStation] = []
+    @Published var workbenchTitle: String = "今日工作台"
+    @Published var railStatus: String = ""
 
     private var streamingAssistantID: UUID?
     private var session: SuperAgentSession?
     private var pollTask: Task<Void, Never>?
-    private var knownJobStates: [String: String] = [:]
+    private var knownStationStatuses: [String: String] = [:]
 
     init() {
         let root = ProjectDiscovery.defaultProjectsRoot()
@@ -29,13 +27,12 @@ final class AppModel: ObservableObject {
 
     func bootstrap() {
         errorBanner = nil
-        refreshRoster()
+        refreshWorkbench()
         startPolling()
 
         guard let executable = AgentMuxExecutableLocator.locate() else {
-            errorBanner = "找不到 am / agentmux。请先安装 CLI。"
+            errorBanner = "找不到 am / agentmux。"
             status = "Missing am"
-            append(.system, "Install AgentMux CLI, then reopen this app.")
             return
         }
 
@@ -50,20 +47,26 @@ final class AppModel: ObservableObject {
             }
         )
         self.session = session
-        status = "Connecting Super Agent…"
+        status = "Connecting…"
 
         Task {
             do {
                 try await session.start()
-                status = "老大在线 · 指挥小弟干活"
-                let ready = brothers.filter(\.available).map(\.backendId).joined(separator: ", ")
+                status = "今日工位 · 跟老大说话"
                 append(
                     .system,
-                    "我是 AgentMux 老大。左侧是小弟花名册 + 任务进度。\n可调度：\(ready.isEmpty ? "扫描中…" : ready)\n例：用 grok 读 agentmux 的 package 版本"
+                    """
+                    早晨开工流程：
+                    1) 说「今天做 A B C」
+                    2) 指定小弟（或让我推荐）
+                    3) 分别说各项目任务
+                    4) 说「开干」并行启动
+                    5) 有疑问/审批会标「等你」——在对话里回答
+                    """
                 )
             } catch {
                 errorBanner = error.localizedDescription
-                status = "Failed to start"
+                status = "Failed"
             }
         }
     }
@@ -72,73 +75,62 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await MainActor.run { self?.refreshRoster() }
+                await MainActor.run { self?.refreshWorkbench() }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }
 
-    /// Refresh brothers + jobs ledger
-    func refreshRoster() {
-        guard let executable = AgentMuxExecutableLocator.locate() else {
-            activityStatus = "无 am"
-            brothersStatus = "无 am"
-            return
-        }
+    func refreshWorkbench() {
+        guard let executable = AgentMuxExecutableLocator.locate() else { return }
         Task {
             do {
-                async let jobsTask = JobLedger.load(executable: executable)
+                async let wbTask = WorkbenchStore.load(executable: executable)
                 async let workersTask = WorkersScan.scan(executable: executable)
-
-                let jobs = try await jobsTask
+                let wb = try await wbTask
                 let workers = try await workersTask
 
                 brothers = workers
-                let avail = workers.filter(\.available)
-                brothersStatus = "小弟 \(avail.count)/\(workers.count) 在岗"
+                workbenchTitle = wb.title
+                stations = wb.stations
 
-                for job in jobs {
-                    let prev = knownJobStates[job.id]
-                    if prev != job.status {
-                        let backend = job.backend ?? "?"
-                        if job.status == "done" {
+                for st in wb.stations {
+                    let prev = knownStationStatuses[st.id]
+                    if prev != st.status {
+                        if st.status == "waiting_user", let q = st.pendingQuestion {
                             append(
                                 .system,
-                                "✅ 小弟 \(backend) 完成 · \(job.project ?? "")：\((job.summary ?? "").prefix(100))"
+                                "⏳ \(st.project ?? "?") 等你：\(q)"
                             )
-                            status = "小弟 \(backend) 已完成"
-                        } else if job.status == "failed" {
+                            status = "有工位等你回答"
+                        } else if st.status == "done" {
                             append(
                                 .system,
-                                "❌ 小弟 \(backend) 失败 · \(job.project ?? "")：\((job.error ?? "").prefix(100))"
+                                "✅ \(st.project ?? "?") 完成 · \((st.summary ?? "").prefix(80))"
                             )
-                            status = "小弟 \(backend) 失败"
-                        } else if job.status == "running", prev == nil || prev == "queued" {
+                        } else if st.status == "failed" {
                             append(
                                 .system,
-                                "⏳ 派小弟 \(backend) → \(job.project ?? "")"
+                                "❌ \(st.project ?? "?") 失败 · \((st.error ?? "").prefix(80))"
                             )
-                            status = "小弟 \(backend) 干活中…"
+                        } else if st.status == "running" {
+                            append(
+                                .system,
+                                "🚀 \(st.project ?? "?") · \(st.backend ?? "?") 开工"
+                            )
                         }
-                        knownJobStates[job.id] = job.status
+                        knownStationStatuses[st.id] = st.status
                     }
                 }
 
-                // Show recent jobs (running first, then recent done)
-                let running = jobs.filter(\.isRunning)
-                let recentDone = jobs.filter(\.isTerminal).prefix(8)
-                var ordered = running + Array(recentDone)
-                activeActivities = ActiveActivity.fromLedgerJobs(ordered)
-
-                let r = running.count
-                let d = jobs.filter { $0.status == "done" }.count
-                let f = jobs.filter { $0.status == "failed" }.count
-                activityStatus = r == 0 && d == 0 && f == 0
-                    ? "暂无派发任务"
-                    : "进行中 \(r) · 完成 \(d) · 失败 \(f)"
+                let running = wb.stations.filter { $0.status == "running" }.count
+                let waiting = wb.stations.filter { $0.status == "waiting_user" }.count
+                let done = wb.stations.filter { $0.status == "done" }.count
+                let ready = wb.stations.filter { $0.status == "ready" }.count
+                railStatus =
+                    "工位 \(wb.stations.count) · 就绪 \(ready) · 跑 \(running) · 等你 \(waiting) · 完成 \(done)"
             } catch {
-                activityStatus = "刷新失败"
-                brothersStatus = "刷新失败"
+                railStatus = "刷新失败"
             }
         }
     }
@@ -150,10 +142,9 @@ final class AppModel: ObservableObject {
             errorBanner = "Super Agent 未启动"
             return
         }
-
         draft = ""
         isBusy = true
-        status = "老大在调度…"
+        status = "老大处理中…"
         append(.user, text)
         streamingAssistantID = nil
 
@@ -161,32 +152,38 @@ final class AppModel: ObservableObject {
             do {
                 _ = try await session.sendUser(text)
                 isBusy = false
-                status = "老大待命 · 可继续派活或问进度"
+                status = "待命 · 可继续布置/开干/回答审批"
                 streamingAssistantID = nil
-                append(.system, "—— 本轮对话结束 ——")
-                refreshRoster()
+                refreshWorkbench()
             } catch {
                 isBusy = false
                 status = "Error"
                 errorBanner = error.localizedDescription
                 append(.error, error.localizedDescription)
                 streamingAssistantID = nil
-                refreshRoster()
             }
         }
     }
 
     func clearChat() {
         lines.removeAll()
-        append(.system, "对话已清空。小弟名册与任务台账仍在左侧。")
+        append(.system, "对话已清空。今日工位仍在左侧。")
     }
 
-    /// Quick chip: prefill a dispatch hint into the composer
-    func suggestDispatch(backend: String) {
-        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    func focusStation(_ station: WorkbenchStation) {
+        guard let p = station.project else { return }
+        if station.status == "waiting_user", let q = station.pendingQuestion {
+            draft = "关于 \(p)：\(q)\n我的回答："
+        } else {
+            draft = "关于 \(p)："
+        }
+    }
+
+    func suggestBackend(_ backend: String) {
+        if draft.isEmpty {
             draft = "用 \(backend) "
-        } else if !draft.contains(backend) {
-            draft = "用 \(backend) " + draft
+        } else {
+            draft += " 用 \(backend) "
         }
     }
 
@@ -205,27 +202,12 @@ final class AppModel: ObservableObject {
         case .tool:
             lines.append(line)
             if line.meta["event"] == "tool_start" || line.meta["event"] == "tool_end" {
-                refreshRoster()
-            }
-            if line.meta["event"] == "tool_end" {
-                let ok = line.meta["toolOk"] != "0"
-                let name = line.meta["toolName"] ?? "tool"
-                let project = line.meta["project"] ?? ""
-                append(
-                    .system,
-                    ok
-                        ? "✅ 调度结束：\(name)\(project.isEmpty ? "" : " · \(project)")"
-                        : "❌ 调度失败：\(name)"
-                )
+                refreshWorkbench()
             }
         case .system, .error, .user:
             lines.append(line)
-            if line.kind == .error {
-                errorBanner = line.text
-            }
-            if line.meta["event"] == "turn_end" {
-                refreshRoster()
-            }
+            if line.kind == .error { errorBanner = line.text }
+            if line.meta["event"] == "turn_end" { refreshWorkbench() }
         }
     }
 

@@ -32,6 +32,8 @@ const RESERVED = new Set([
     "job",
     "workers",
     "worker",
+    "workbench",
+    "wb",
     "help",
     "--help",
     "-h",
@@ -105,6 +107,27 @@ export async function runCli(argv: string[]): Promise<number> {
                     `Available: ${agents.filter((x) => x.available).length} · Running procs (sum): ${agents.reduce((n, x) => n + x.runningCount, 0)} · Dispatchable workers: ${agents.filter((x) => x.dispatchable).length}`,
                 );
                 return 0;
+            }
+            case "workbench":
+            case "wb": {
+                const wb = await import("./workbench.js");
+                const sub = rest[0];
+                if (!sub || sub === "status" || sub === "--json" || sub === "-j") {
+                    const bench = await wb.loadWorkbench();
+                    if (rest.includes("--json") || rest.includes("-j") || sub === "--json") {
+                        console.log(JSON.stringify(bench, null, 2));
+                    } else {
+                        console.log(wb.formatWorkbench(bench));
+                    }
+                    return 0;
+                }
+                if (sub === "clear") {
+                    await wb.saveWorkbench(wb.emptyWorkbench());
+                    console.log("workbench cleared");
+                    return 0;
+                }
+                console.error("Usage: am workbench [status|--json|clear]");
+                return 2;
             }
             case "workers": {
                 const { listDispatchableBackends } = await import(
@@ -467,7 +490,7 @@ Inspect:
   am list                       Projects under ~/Projects
   am agents                     Local agents (path / running / dispatchable)
   am jobs                       Dispatched jobs (done/running/failed)
-  am jobs --json
+  am workbench                  Today's multi-project stations
 
 Examples:
   am super 看下我有哪些小弟，用 grok 读 agentmux 的 package 版本

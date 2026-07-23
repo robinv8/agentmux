@@ -110,10 +110,22 @@ const result = await runOneShot({
 });
 ```
 
+## macOS app (native)
+
+SwiftUI client for the same list → select → one-shot → stream flow:
+
+```bash
+cd macos
+swift run AgentMuxApp
+```
+
+See [macos/README.md](macos/README.md).
+
 ## Tests
 
 ```bash
 bun test
+cd macos && swift test
 ```
 
 ## Non-goals

@@ -10,13 +10,17 @@ final class AppModel: ObservableObject {
     @Published var projectsRootPath: String
     @Published var errorBanner: String?
 
+    /// 可调度小弟（pi/claude/codex/grok/kimi）
+    @Published var brothers: [WorkerBrother] = []
+    /// 任务台账（进行中 / 刚完成）
     @Published var activeActivities: [ActiveActivity] = []
     @Published var activityStatus: String = ""
+    @Published var brothersStatus: String = ""
 
     private var streamingAssistantID: UUID?
     private var session: SuperAgentSession?
     private var pollTask: Task<Void, Never>?
-    private var knownJobStates: [String: String] = [:] // id -> status for completion toasts
+    private var knownJobStates: [String: String] = [:]
 
     init() {
         let root = ProjectDiscovery.defaultProjectsRoot()
@@ -25,7 +29,7 @@ final class AppModel: ObservableObject {
 
     func bootstrap() {
         errorBanner = nil
-        refreshActiveAgents()
+        refreshRoster()
         startPolling()
 
         guard let executable = AgentMuxExecutableLocator.locate() else {
@@ -51,10 +55,11 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await session.start()
-                status = "Super Agent ready"
+                status = "老大在线 · 指挥小弟干活"
+                let ready = brothers.filter(\.available).map(\.backendId).joined(separator: ", ")
                 append(
                     .system,
-                    "任务完成状态以左侧「任务台账」为准（磁盘 jobs）。可问：做完了吗？"
+                    "我是 AgentMux 老大。左侧是小弟花名册 + 任务进度。\n可调度：\(ready.isEmpty ? "扫描中…" : ready)\n例：用 grok 读 agentmux 的 package 版本"
                 )
             } catch {
                 errorBanner = error.localizedDescription
@@ -67,73 +72,73 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await MainActor.run { self?.refreshActiveAgents() }
+                await MainActor.run { self?.refreshRoster() }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }
 
-    /// Poll job ledger + local agent processes. Jobs file is completion source of truth.
-    func refreshActiveAgents() {
+    /// Refresh brothers + jobs ledger
+    func refreshRoster() {
         guard let executable = AgentMuxExecutableLocator.locate() else {
             activityStatus = "无 am"
+            brothersStatus = "无 am"
             return
         }
         Task {
             do {
                 async let jobsTask = JobLedger.load(executable: executable)
-                async let agentsTask = LocalAgentScan.scan(executable: executable)
+                async let workersTask = WorkersScan.scan(executable: executable)
 
                 let jobs = try await jobsTask
-                let agents = try await agentsTask
+                let workers = try await workersTask
 
-                // Completion notifications when status flips to done/failed
+                brothers = workers
+                let avail = workers.filter(\.available)
+                brothersStatus = "小弟 \(avail.count)/\(workers.count) 在岗"
+
                 for job in jobs {
                     let prev = knownJobStates[job.id]
                     if prev != job.status {
+                        let backend = job.backend ?? "?"
                         if job.status == "done" {
                             append(
                                 .system,
-                                "✅ 任务完成 · \(job.project ?? job.kind)：\((job.summary ?? "").prefix(120))"
+                                "✅ 小弟 \(backend) 完成 · \(job.project ?? "")：\((job.summary ?? "").prefix(100))"
                             )
-                            status = "任务已完成"
+                            status = "小弟 \(backend) 已完成"
                         } else if job.status == "failed" {
                             append(
                                 .system,
-                                "❌ 任务失败 · \(job.project ?? job.kind)：\((job.error ?? "").prefix(120))"
+                                "❌ 小弟 \(backend) 失败 · \(job.project ?? "")：\((job.error ?? "").prefix(100))"
                             )
-                            status = "任务失败"
+                            status = "小弟 \(backend) 失败"
                         } else if job.status == "running", prev == nil || prev == "queued" {
                             append(
                                 .system,
-                                "⏳ 任务开始 · \(job.project ?? job.kind)"
+                                "⏳ 派小弟 \(backend) → \(job.project ?? "")"
                             )
+                            status = "小弟 \(backend) 干活中…"
                         }
                         knownJobStates[job.id] = job.status
                     }
                 }
 
-                let fromJobs = ActiveActivity.fromLedgerJobs(jobs)
-                let fromLocal = ActiveActivityBuilder.fromLocalAgents(agents)
-                    .filter { $0.status == .running }
+                // Show recent jobs (running first, then recent done)
+                let running = jobs.filter(\.isRunning)
+                let recentDone = jobs.filter(\.isTerminal).prefix(8)
+                var ordered = running + Array(recentDone)
+                activeActivities = ActiveActivity.fromLedgerJobs(ordered)
 
-                // Prefer ledger jobs; append local TUI sessions
-                var merged = fromJobs
-                merged.append(contentsOf: fromLocal)
-                var seen = Set<String>()
-                activeActivities = merged.filter { seen.insert($0.id).inserted }
-
-                let running = jobs.filter(\.isRunning).count
-                let done = jobs.filter { $0.status == "done" }.count
-                let failed = jobs.filter { $0.status == "failed" }.count
-                if running == 0 && done == 0 && failed == 0 && fromLocal.isEmpty {
-                    activityStatus = "暂无活跃任务"
-                } else {
-                    activityStatus =
-                        "进行中 \(running + fromLocal.count) · 完成 \(done) · 失败 \(failed)"
-                }
+                let r = running.count
+                let d = jobs.filter { $0.status == "done" }.count
+                let f = jobs.filter { $0.status == "failed" }.count
+                activityStatus = r == 0 && d == 0 && f == 0
+                    ? "暂无派发任务"
+                    : "进行中 \(r) · 完成 \(d) · 失败 \(f)"
             } catch {
                 activityStatus = "刷新失败"
+                brothersStatus = "刷新失败"
             }
         }
     }
@@ -148,7 +153,7 @@ final class AppModel: ObservableObject {
 
         draft = ""
         isBusy = true
-        status = "Super Agent 处理中…"
+        status = "老大在调度…"
         append(.user, text)
         streamingAssistantID = nil
 
@@ -156,25 +161,33 @@ final class AppModel: ObservableObject {
             do {
                 _ = try await session.sendUser(text)
                 isBusy = false
-                status = "本轮对话结束（任务状态见左侧）"
+                status = "老大待命 · 可继续派活或问进度"
                 streamingAssistantID = nil
-                append(.system, "—— Super Agent 本轮回答结束 ——")
-                // Immediate ledger refresh after turn
-                refreshActiveAgents()
+                append(.system, "—— 本轮对话结束 ——")
+                refreshRoster()
             } catch {
                 isBusy = false
                 status = "Error"
                 errorBanner = error.localizedDescription
                 append(.error, error.localizedDescription)
                 streamingAssistantID = nil
-                refreshActiveAgents()
+                refreshRoster()
             }
         }
     }
 
     func clearChat() {
         lines.removeAll()
-        append(.system, "对话已清空。任务台账仍在左侧。")
+        append(.system, "对话已清空。小弟名册与任务台账仍在左侧。")
+    }
+
+    /// Quick chip: prefill a dispatch hint into the composer
+    func suggestDispatch(backend: String) {
+        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft = "用 \(backend) "
+        } else if !draft.contains(backend) {
+            draft = "用 \(backend) " + draft
+        }
     }
 
     private func handleSessionLine(_ line: ChatLine) {
@@ -191,18 +204,18 @@ final class AppModel: ObservableObject {
             }
         case .tool:
             lines.append(line)
-            // Kick a ledger refresh on tool boundaries
             if line.meta["event"] == "tool_start" || line.meta["event"] == "tool_end" {
-                refreshActiveAgents()
+                refreshRoster()
             }
             if line.meta["event"] == "tool_end" {
                 let ok = line.meta["toolOk"] != "0"
                 let name = line.meta["toolName"] ?? "tool"
                 let project = line.meta["project"] ?? ""
-                let label = project.isEmpty ? name : "\(name) · \(project)"
                 append(
                     .system,
-                    ok ? "✅ 工具结束：\(label)" : "❌ 工具失败：\(label)"
+                    ok
+                        ? "✅ 调度结束：\(name)\(project.isEmpty ? "" : " · \(project)")"
+                        : "❌ 调度失败：\(name)"
                 )
             }
         case .system, .error, .user:
@@ -211,7 +224,7 @@ final class AppModel: ObservableObject {
                 errorBanner = line.text
             }
             if line.meta["event"] == "turn_end" {
-                refreshActiveAgents()
+                refreshRoster()
             }
         }
     }

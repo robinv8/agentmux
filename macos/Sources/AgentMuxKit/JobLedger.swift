@@ -11,6 +11,20 @@ public struct LedgerJob: Identifiable, Equatable, Sendable {
     public let error: String?
     public let updatedAt: String?
     public let finishedAt: String?
+    public let toolName: String?
+
+    /// Backend extracted from toolName `run_in_project:grok` or summary `[grok]`
+    public var backend: String? {
+        if let toolName, toolName.contains(":") {
+            return String(toolName.split(separator: ":").last ?? "")
+        }
+        if let summary, summary.hasPrefix("["),
+           let end = summary.firstIndex(of: "]")
+        {
+            return String(summary[summary.index(after: summary.startIndex)..<end])
+        }
+        return nil
+    }
 
     public var isTerminal: Bool {
         status == "done" || status == "failed"
@@ -64,7 +78,8 @@ public enum JobLedger {
                 summary: row["summary"] as? String,
                 error: row["error"] as? String,
                 updatedAt: row["updatedAt"] as? String,
-                finishedAt: row["finishedAt"] as? String
+                finishedAt: row["finishedAt"] as? String,
+                toolName: row["toolName"] as? String
             )
         }
     }
@@ -85,23 +100,19 @@ public extension ActiveActivity {
             let status: ActiveActivity.Status
             switch job.status {
             case "done": status = .done
-            case "failed": status = .done // show as terminal; subtitle distinguishes
+            case "failed": status = .done
             case "running", "queued": status = .running
             default: status = .idle
             }
-            let title: String
-            if job.kind == "run_in_project" {
-                title = "Pi Worker"
-            } else {
-                title = job.kind
-            }
+            let backend = job.backend ?? "worker"
+            let title = backend.uppercased()
             let subtitle: String
             if job.status == "failed" {
-                subtitle = job.project.map { "项目 · \($0) · 失败" } ?? "失败"
+                subtitle = job.project.map { "小弟 \(backend) · \($0) · 失败" } ?? "失败"
             } else if job.status == "done" {
-                subtitle = job.project.map { "项目 · \($0) · 已完成" } ?? "已完成"
+                subtitle = job.project.map { "小弟 \(backend) · \($0) · 已完成" } ?? "已完成"
             } else {
-                subtitle = job.project.map { "项目 · \($0) · 进行中" } ?? "进行中"
+                subtitle = job.project.map { "小弟 \(backend) · \($0) · 进行中" } ?? "进行中"
             }
             return ActiveActivity(
                 id: "job-\(job.id)",
@@ -109,7 +120,7 @@ public extension ActiveActivity {
                 subtitle: subtitle,
                 status: status,
                 source: .superJob,
-                agentId: job.kind == "run_in_project" ? "pi" : "agentmux",
+                agentId: backend,
                 project: job.project,
                 detail: job.summary ?? job.error ?? job.message,
                 updatedAt: ISO8601DateFormatter().date(from: job.updatedAt ?? "") ?? Date()

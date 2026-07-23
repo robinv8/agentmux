@@ -1,25 +1,5 @@
 import Foundation
 
-public struct ChatLine: Identifiable, Equatable, Sendable {
-    public enum Kind: String, Sendable {
-        case user
-        case assistant
-        case tool
-        case system
-        case error
-    }
-
-    public let id: UUID
-    public var kind: Kind
-    public var text: String
-
-    public init(id: UUID = UUID(), kind: Kind, text: String) {
-        self.id = id
-        self.kind = kind
-        self.text = text
-    }
-}
-
 /// Drives `am super --rpc` (JSONL) for Super Agent chat.
 public actor SuperAgentSession {
     private var process: Process?
@@ -94,7 +74,6 @@ public actor SuperAgentSession {
         errPipe.fileHandleForReading.readabilityHandler = { [onEvent] h in
             let data = h.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
-            // keep stderr quiet unless debugging — surface as system note
             if text.lowercased().contains("error") {
                 onEvent(ChatLine(kind: .system, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
             }
@@ -102,9 +81,8 @@ public actor SuperAgentSession {
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             readyContinuation = cont
-            // timeout if ready never arrives
             Task {
-                try await Task.sleep(nanoseconds: 8_000_000_000)
+                try await Task.sleep(nanoseconds: 12_000_000_000)
                 if let c = self.readyContinuation {
                     self.readyContinuation = nil
                     c.resume(throwing: SuperSessionError.notReady)
@@ -165,35 +143,75 @@ public actor SuperAgentSession {
             }
             let root = obj["projectsRoot"] as? String ?? ""
             onEvent(ChatLine(kind: .system, text: "Super Agent ready · \(root)"))
+
         case "assistant_text":
             let text = obj["text"] as? String ?? ""
             accumulatedAssistant += text
             onEvent(ChatLine(kind: .assistant, text: text))
+
         case "tool_start":
             let name = obj["toolName"] as? String ?? "tool"
-            let input = obj["toolInput"] as? [String: Any]
-            let detail: String
-            if let input, let data = try? JSONSerialization.data(withJSONObject: input),
-               let s = String(data: data, encoding: .utf8)
-            {
-                detail = s
-            } else {
-                detail = ""
+            let callId = obj["toolCallId"] as? String ?? UUID().uuidString
+            var project = ""
+            var message = ""
+            var detail = ""
+            if let input = obj["toolInput"] as? [String: Any] {
+                project = input["project"] as? String ?? ""
+                message = input["message"] as? String ?? ""
+                if let data = try? JSONSerialization.data(withJSONObject: input),
+                   let s = String(data: data, encoding: .utf8)
+                {
+                    detail = s
+                }
             }
-            onEvent(ChatLine(kind: .tool, text: "→ \(name) \(detail)"))
+            var meta: [String: String] = [
+                "event": "tool_start",
+                "toolName": name,
+                "toolCallId": callId,
+            ]
+            if !project.isEmpty { meta["project"] = project }
+            if !message.isEmpty { meta["message"] = String(message.prefix(200)) }
+            onEvent(ChatLine(
+                kind: .tool,
+                text: "→ \(name)" + (project.isEmpty ? "" : " · \(project)"),
+                meta: meta
+            ))
+            _ = detail
+
         case "tool_end":
             let name = obj["toolName"] as? String ?? "tool"
-            let result = (obj["toolResult"] as? String ?? "").prefix(280)
-            onEvent(ChatLine(kind: .tool, text: "✓ \(name): \(result)"))
+            let callId = obj["toolCallId"] as? String ?? ""
+            let result = obj["toolResult"] as? String ?? ""
+            let ok = obj["toolOk"] as? Bool ?? true
+            let meta: [String: String] = [
+                "event": "tool_end",
+                "toolName": name,
+                "toolCallId": callId,
+                "toolOk": ok ? "1" : "0",
+                "toolResult": String(result.prefix(500)),
+            ]
+            let preview = String(result.prefix(160)).replacingOccurrences(of: "\n", with: " ")
+            onEvent(ChatLine(
+                kind: .tool,
+                text: ok ? "✓ \(name) 完成 · \(preview)" : "✗ \(name) 失败 · \(preview)",
+                meta: meta
+            ))
+
         case "turn_end":
             let text = obj["assistantText"] as? String ?? accumulatedAssistant
+            onEvent(ChatLine(
+                kind: .system,
+                text: "本轮结束",
+                meta: ["event": "turn_end"]
+            ))
             if let c = turnContinuation {
                 turnContinuation = nil
                 c.resume(returning: text)
             }
+
         case "error":
             let err = obj["error"] as? String ?? "unknown error"
-            onEvent(ChatLine(kind: .error, text: err))
+            onEvent(ChatLine(kind: .error, text: err, meta: ["event": "error"]))
             if let c = turnContinuation {
                 turnContinuation = nil
                 c.resume(throwing: SuperSessionError.remote(err))
@@ -202,6 +220,7 @@ public actor SuperAgentSession {
                 readyContinuation = nil
                 c.resume(throwing: SuperSessionError.remote(err))
             }
+
         default:
             break
         }

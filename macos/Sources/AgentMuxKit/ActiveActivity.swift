@@ -76,11 +76,11 @@ public enum ActiveActivityBuilder {
                     ActiveActivity(
                         id: "local-\(agent.agentId)",
                         title: agent.name,
-                        subtitle: "\(agent.runningCount) 个进程",
+                        subtitle: "\(agent.runningCount) 个进程在线",
                         status: .running,
                         source: .localSession,
                         agentId: agent.agentId,
-                        detail: agent.path
+                        detail: (agent.path ?? "") + " · 进程存活≠生成完毕（外部 TUI 仅能检测进程）"
                     )
                 )
             }

@@ -108,6 +108,11 @@ struct ContentView: View {
                 if let p = a.project {
                     chip(p)
                 }
+                if a.status == .done {
+                    chip("已完成")
+                } else if a.status == .running {
+                    chip("进行中")
+                }
             }
         }
         .padding(12)

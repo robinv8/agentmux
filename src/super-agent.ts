@@ -43,9 +43,13 @@ export interface SuperAgentEvent {
         | "turn_end"
         | "error";
     text?: string;
+    /** Stable id for matching start/end of the same tool call */
+    toolCallId?: string;
     toolName?: string;
     toolInput?: Record<string, unknown>;
     toolResult?: string;
+    /** Whether tool finished successfully */
+    toolOk?: boolean;
     error?: string;
 }
 
@@ -238,14 +242,17 @@ export async function runSuperTurn(options: {
         for (const tool of toolUses) {
             onEvent?.({
                 type: "tool_start",
+                toolCallId: tool.id,
                 toolName: tool.name,
                 toolInput: tool.input,
             });
             const result = await executeTool(tool.name, tool.input, config);
             onEvent?.({
                 type: "tool_end",
+                toolCallId: tool.id,
                 toolName: tool.name,
                 toolResult: result.text,
+                toolOk: !result.isError,
             });
             toolResults.push({
                 type: "tool_result",

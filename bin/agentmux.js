@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Launchable commander CLI for multi-project Pi workers.
+ * AgentMux CLI — multi-project Pi commander.
  *
- * Usage:
+ * Primary:
+ *   agentmux <project> <message...>
  *   agentmux list
- *   agentmux status <project>
- *   agentmux dispatch <project> <message...>
- *   agentmux register <project> --socket <path> [--pid N]
- *   agentmux worker <project>   # start local pi --mode rpc bridge + register
+ *   agentmux chat
  */
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

@@ -2,10 +2,11 @@
 
 ## Scope
 
-`agentmux` can discover local project directories, track worker process IDs, and
-send prompts to local [Pi](https://github.com/earendil-works/pi) RPC workers via
-Unix domain sockets. Treat it as a **local development tool with full user
-privileges**, not a multi-tenant control plane.
+**AgentMux** can discover local project directories, spawn short-lived
+[Pi](https://github.com/earendil-works/pi) RPC workers, track optional long-lived
+worker PIDs, and send prompts over stdin JSONL or Unix sockets. Treat it as a
+**local development tool with full user privileges**, not a multi-tenant control
+plane.
 
 ## Reporting a vulnerability
 

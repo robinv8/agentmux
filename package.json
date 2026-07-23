@@ -1,7 +1,7 @@
 {
   "name": "agentmux",
   "version": "0.1.0",
-  "description": "Multi-project agent mux: list, dispatch, and status for local Pi RPC workers",
+  "description": "AgentMux — one command to run a Pi coding agent in any local project",
   "type": "module",
   "license": "MIT",
   "author": "robinv8",

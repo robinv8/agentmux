@@ -1,31 +1,26 @@
-# agentmux
+# AgentMux
 
-**One commander. Many project workers.**
+**One command. Right project. Done.**
 
-`agentmux` is a local multi-project super-agent for [Pi](https://github.com/earendil-works/pi): list every repo under your Projects folder, dispatch prompts to per-project Pi RPC workers, and report coarse status (`running` | `idle` | `offline` | `unknown`) — without juggling a grid of agent terminals.
+AgentMux is a local multi-project commander for [Pi](https://github.com/earendil-works/pi). Point it at a folder of repos (default `~/Projects`), name a project, give it a task — it spins up a short-lived Pi RPC worker, runs the prompt there, streams the reply, and exits.
 
-It does **not** inject keystrokes into Grok / Codex / Kimi (or other) interactive TUIs. The MVP wire protocol is **Pi RPC** over a Unix domain socket bridge.
+No second terminal. No manual worker registration for the common path.
 
 [![CI](https://github.com/robinv8/agentmux/actions/workflows/ci.yml/badge.svg)](https://github.com/robinv8/agentmux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Why
 
-If you run coding agents across many repos, progress is scattered: one tab per project, different CLIs, constant context switching. `agentmux` gives you a single CLI (or Pi extension) that:
+Running coding agents across many repos usually means a grid of tabs and constant context switching. AgentMux collapses the happy path to:
 
-1. **Discovers** project roots under a configurable directory (default `~/Projects`)
-2. **Registers** workers (Pi `--mode rpc` processes) in a durable registry
-3. **Dispatches** prompts programmatically
-4. **Reports** whether each worker is running, idle, or offline
-
-## Status
-
-MVP — core discovery / registry / status / dispatch are implemented and unit-tested. Live multi-worker UX and richer streaming back into the commander are future work.
+```bash
+agentmux mindmux-app Fix the login form validation
+```
 
 ## Requirements
 
-- [Bun](https://bun.sh) (or Node 20+ for library use)
-- Optional for live workers: global Pi CLI
+- [Bun](https://bun.sh) (recommended) or Node 20+
+- [Pi coding agent](https://github.com/earendil-works/pi) on your `PATH` for live runs:
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
@@ -38,48 +33,52 @@ git clone https://github.com/robinv8/agentmux.git
 cd agentmux
 ```
 
-No install step is required for the Bun CLI entry; run it from the repo.
-
-## Quick start
+Optional global alias:
 
 ```bash
-# List projects + worker registration/status
-bun run bin/agentmux.js list
-
-# Start a Pi RPC worker for a project (keeps this process alive)
-bun run bin/agentmux.js worker my-app
-
-# In another terminal: dispatch a prompt
-bun run bin/agentmux.js dispatch my-app "Summarize the README in one sentence"
-
-# Coarse status for one project
-bun run bin/agentmux.js status my-app
-
-# Register an already-bridged socket
-bun run bin/agentmux.js register my-app \
-  --socket ~/.pi/agent/worker-sockets/my-app.sock \
-  --pid 12345
+# zsh/bash
+alias agentmux='bun /path/to/agentmux/bin/agentmux.js'
 ```
 
-### As a Pi extension
+## Usage
+
+### Primary: one-shot run
 
 ```bash
-cd /path/to/agentmux
-pi -e ./extensions/commander.ts
+# List projects under ~/Projects
+agentmux list
+
+# Run an agent in a project (spawn → prompt → stream → exit)
+agentmux mindmux-app Fix the login form validation
+
+# Explicit form (same behavior)
+agentmux run AIDesignPrompt Run bun test schema/goal and fix failures
 ```
 
-Tools exposed to the model:
+### Interactive chat
 
-| Tool | Purpose |
-|------|---------|
-| `list_projects` | Inventory projects + worker status |
-| `worker_status` | Status for one project |
-| `dispatch_to_project` | Send a prompt via Pi RPC |
+```bash
+agentmux chat
+# AgentMux> list
+# AgentMux> mindmux-app add a loading skeleton to the home page
+# AgentMux> /quit
+```
+
+### Advanced: long-lived workers
+
+Only if you want a persistent worker you can `dispatch` into repeatedly:
+
+```bash
+agentmux serve my-app          # keep Pi RPC up + register socket
+agentmux dispatch my-app "…"   # send to that registered worker
+```
+
+Most people never need this — prefer `agentmux <project> <message>`.
 
 ## Configuration
 
-| Environment variable | Default |
-|----------------------|---------|
+| Variable | Default |
+|----------|---------|
 | `AGENTMUX_PROJECTS_ROOT` | `~/Projects` |
 | `AGENTMUX_REGISTRY` | `~/.pi/agent/workers.json` |
 | `AGENTMUX_SOCKETS` | `~/.pi/agent/worker-sockets` |
@@ -88,45 +87,37 @@ Tools exposed to the model:
 ## Architecture
 
 ```
-commander CLI / Pi extension
-    │
-    ├─ discovery  → direct children of Projects root
-    ├─ registry   → workers.json (project → socket / pid)
-    ├─ status     → process probe + optional RPC get_state
-    └─ dispatch   → JSONL over Unix socket → pi --mode rpc
+agentmux <project> <message>
+        │
+        ├─ discover project under Projects root
+        ├─ spawn: pi --mode rpc --no-session  (cwd = project)
+        ├─ JSONL prompt on stdin
+        ├─ stream text_delta → your terminal
+        └─ wait agent_settled → exit
 ```
 
-Workers are **Pi RPC** processes, bridged to a Unix domain socket so the commander can dial without sharing a TTY.
+Long-lived mode (optional) bridges Pi RPC to a Unix socket and records it in the registry for `dispatch`.
 
-### Registry shape
+## As a Pi extension
 
-```json
-{
-  "version": 1,
-  "workers": {
-    "my-app": {
-      "projectId": "my-app",
-      "cwd": "/home/you/Projects/my-app",
-      "rpcSocketPath": "/home/you/.pi/agent/worker-sockets/my-app.sock",
-      "pid": 12345,
-      "mode": "rpc",
-      "updatedAt": "2026-07-23T00:00:00.000Z"
-    }
-  }
-}
+```bash
+cd /path/to/agentmux
+pi -e ./extensions/commander.ts
 ```
 
-## Library surface
+Tools: `list_projects`, `worker_status`, `run_in_project`.
 
-Pure modules under `src/` are importable for embedding:
-
-- `discoverProjects` / `resolveProjectTarget`
-- `loadRegistry` / `saveRegistry` / `upsertWorker`
-- `classifyStatus` / `buildInventory`
-- `dispatchToProject` / `SocketPiRpcClient`
+## Library
 
 ```ts
-import { discoverProjects, classifyStatus } from "./src/index.ts";
+import { discoverProjects, runOneShot } from "./src/index.ts";
+
+const projects = await discoverProjects({ projectsRoot: "~/Projects" });
+const result = await runOneShot({
+  projectQuery: "my-app",
+  message: "summarize README",
+  projects,
+});
 ```
 
 ## Tests
@@ -135,18 +126,17 @@ import { discoverProjects, classifyStatus } from "./src/index.ts";
 bun test
 ```
 
-Tests cover discovery, registry I/O, status classification, dispatch routing, and a mock Pi JSONL RPC server over real Unix sockets (no live `pi` binary required).
+Unit tests cover discovery, registry, status, socket dispatch, and one-shot RPC with a mock Pi process (no live `pi` binary required).
 
-## Non-goals (MVP)
+## Non-goals
 
-- Keystroke injection into third-party agent TUIs
-- Full dual-way chat proxy of every worker token stream into the commander
-- Remote / multi-user / cloud orchestration
-- Replacing each project's preferred long-term coding agent
+- Keystroke injection into Grok / Codex / Kimi TUIs
+- Cloud / multi-user orchestration
+- Full dual-way chat mux of every token into a single super-model (roadmap)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security: [SECURITY.md](SECURITY.md).
 
 ## License
 
@@ -154,4 +144,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY
 
 ## Acknowledgments
 
-Built to orchestrate [Pi](https://github.com/earendil-works/pi) workers. Pi is a separate project with its own license and maintainers.
+Workers speak [Pi](https://github.com/earendil-works/pi) RPC. Pi is a separate project.

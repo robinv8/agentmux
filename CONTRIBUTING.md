@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve **agentmux**.
+Thanks for helping improve **AgentMux**.
 
 ## Development
 
@@ -14,14 +14,15 @@ bun run bin/agentmux.js list
 Requirements:
 
 - [Bun](https://bun.sh) (preferred for tests and the CLI entry)
-- Optional: [Pi coding agent](https://github.com/earendil-works/pi) for live RPC workers
+- Optional: [Pi coding agent](https://github.com/earendil-works/pi) for live one-shot / serve
 
 ## Guidelines
 
-1. Keep discovery, registry, status classification, and dispatch **pure / injectable** so unit tests do not need a real `pi` binary.
-2. Prefer small PRs with tests for new pure logic.
-3. Do not add keystroke injection into third-party TUIs (Grok / Codex / Kimi, etc.); the MVP protocol is **Pi RPC**.
+1. Keep discovery, registry, status, one-shot, and dispatch **injectable** so unit tests mock spawn/RPC without a real `pi` binary.
+2. Prefer the **one-shot** path (`runOneShot`) for default UX; long-lived workers are advanced.
+3. Do not add keystroke injection into third-party TUIs; protocol is **Pi RPC**.
 4. Avoid committing personal paths, sockets, registries, or API keys.
+5. User-facing product name is **AgentMux**; CLI binary stays `agentmux`.
 
 ## Pull requests
 

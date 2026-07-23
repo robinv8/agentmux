@@ -1,10 +1,7 @@
 /**
- * Pi extension: expose list / status / dispatch as tools on a commander session.
+ * Pi extension for AgentMux: list / status / run (one-shot) tools.
  *
- * Install: point settings packages/extensions at this file, or:
- *   pi -e ./agentmux/extensions/commander.ts
- *
- * Tools call the same pure modules as the CLI so behavior stays consistent.
+ *   pi -e ./extensions/commander.ts
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -14,11 +11,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const extDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(extDir, "..");
 
-async function loadCommander() {
-    const mod = await import(
-        pathToFileURL(path.join(packageRoot, "src", "commander.ts")).href
-    );
-    return mod as typeof import("../src/commander.ts");
+async function loadMod(name: string) {
+    return import(pathToFileURL(path.join(packageRoot, "src", name)).href);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -26,16 +20,21 @@ export default function (pi: ExtensionAPI) {
         name: "list_projects",
         label: "List Projects",
         description:
-            "List projects under the configured Projects root and show worker registration + coarse status (running/idle/offline/unknown).",
+            "List projects under AGENTMUX_PROJECTS_ROOT (default ~/Projects) with coarse worker status.",
         parameters: Type.Object({}),
         async execute() {
-            const { defaultCommanderConfig, listProjects } = await loadCommander();
-            const { table, items } = await listProjects(defaultCommanderConfig());
+            const { defaultCommanderConfig, listProjects } =
+                (await loadMod(
+                    "commander.ts",
+                )) as typeof import("../src/commander.ts");
+            const { table, items } = await listProjects(
+                defaultCommanderConfig(),
+            );
             return {
                 content: [
                     {
                         type: "text",
-                        text: `${table}\n\nTotal: ${items.length}; with workers: ${items.filter((i) => i.worker).length}`,
+                        text: `${table}\n\nTotal: ${items.length}`,
                     },
                 ],
                 details: { count: items.length },
@@ -47,15 +46,17 @@ export default function (pi: ExtensionAPI) {
         name: "worker_status",
         label: "Worker Status",
         description:
-            "Report coarse status for one project worker: running | idle | offline | unknown.",
+            "Report coarse status for one project: running | idle | offline | unknown.",
         parameters: Type.Object({
             project: Type.String({
-                description: "Project basename or id under Projects root",
+                description: "Project basename under Projects root",
             }),
         }),
         async execute(_id, params) {
             const { defaultCommanderConfig, statusForProject } =
-                await loadCommander();
+                (await loadMod(
+                    "commander.ts",
+                )) as typeof import("../src/commander.ts");
             const result = await statusForProject(
                 defaultCommanderConfig(),
                 params.project,
@@ -73,30 +74,48 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.registerTool({
-        name: "dispatch_to_project",
-        label: "Dispatch To Project",
+        name: "run_in_project",
+        label: "Run In Project",
         description:
-            "Send a user prompt to a registered project worker via Pi RPC (not by typing into its TUI).",
+            "One-shot: spawn Pi RPC in the project cwd, send the prompt, wait until settled, return the assistant reply. Preferred over long-lived workers.",
         parameters: Type.Object({
             project: Type.String({
-                description: "Project basename or id",
+                description: "Project basename under Projects root",
             }),
             message: Type.String({
-                description: "Prompt text for the worker agent",
+                description: "What the agent should do in that project",
             }),
         }),
         async execute(_id, params) {
-            const { defaultCommanderConfig, dispatch } = await loadCommander();
-            const result = await dispatch(
-                defaultCommanderConfig(),
-                params.project,
-                params.message,
-            );
+            const { defaultCommanderConfig } =
+                (await loadMod(
+                    "commander.ts",
+                )) as typeof import("../src/commander.ts");
+            const { discoverProjects } =
+                (await loadMod(
+                    "discovery.ts",
+                )) as typeof import("../src/discovery.ts");
+            const { runOneShot } =
+                (await loadMod(
+                    "oneshot.ts",
+                )) as typeof import("../src/oneshot.ts");
+            const config = defaultCommanderConfig();
+            const projects = await discoverProjects({
+                projectsRoot: config.projectsRoot,
+            });
+            const result = await runOneShot({
+                projectQuery: params.project,
+                message: params.message,
+                projects,
+                piBinary: config.piBinary,
+            });
             return {
                 content: [
                     {
                         type: "text",
-                        text: JSON.stringify(result, null, 2),
+                        text: result.ok
+                            ? (result.assistantText ?? "(no text)")
+                            : `Error: ${result.error}`,
                     },
                 ],
                 details: result,

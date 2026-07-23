@@ -1,28 +1,20 @@
 import SwiftUI
+import AppKit
 import AgentMuxKit
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
-    @FocusState private var focusedField: Field?
-
-    private enum Field: Hashable {
-        case projectsRoot
-        case task
-    }
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             projectSidebar
-        } detail: {
+                .frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
             detailPane
+                .frame(minWidth: 420)
         }
-        .navigationTitle("AgentMux")
         .onAppear {
             model.refreshProjects()
-            // Defer focus so the window is key first.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                focusedField = .task
-            }
+            NSApp.activate(ignoringOtherApps: true)
         }
         .frame(minWidth: 780, minHeight: 480)
     }
@@ -44,13 +36,14 @@ struct ContentView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
-            TextField("Projects root", text: $model.projectsRootPath)
-                .textFieldStyle(.roundedBorder)
-                .font(.caption)
-                .focused($focusedField, equals: .projectsRoot)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-                .onSubmit { model.refreshProjects() }
+            FocusableLineField(
+                text: $model.projectsRootPath,
+                placeholder: "Projects root path",
+                onSubmit: { model.refreshProjects() }
+            )
+            .frame(height: 28)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
 
             List(selection: $model.selectedProjectID) {
                 ForEach(model.projects) { project in
@@ -68,11 +61,7 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
-            .onChange(of: model.selectedProjectID) { _ in
-                focusedField = .task
-            }
         }
-        .frame(minWidth: 220)
     }
 
     private var detailPane: some View {
@@ -92,27 +81,17 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // TextField(axis:) is more reliable for keyboard focus on macOS
-            // than TextEditor inside NavigationSplitView.
-            TextField(
-                "Describe the task for this project…",
+            Text("Task")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            FocusableTextView(
                 text: $model.taskText,
-                axis: .vertical
+                isEditable: !model.isRunning,
+                placeholder: "Describe the task for this project…",
+                onSubmit: { model.runTask() }
             )
-            .lineLimit(3...10)
-            .textFieldStyle(.plain)
-            .font(.body)
-            .padding(10)
-            .frame(minHeight: 88, alignment: .topLeading)
-            .background(Color.primary.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.35))
-                    .allowsHitTesting(false)
-            )
-            .focused($focusedField, equals: .task)
-            .disabled(model.isRunning)
+            .frame(minHeight: 100, maxHeight: 160)
             .accessibilityIdentifier("agentmux.task.input")
 
             HStack {
@@ -129,7 +108,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                Text("⌘↩ to run")
+                Text("⌘↩ to run · click task area to type")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -149,13 +128,9 @@ struct ContentView: View {
                 .foregroundStyle(model.transcript.isEmpty ? .secondary : .primary)
             }
             .padding(8)
+            .frame(maxHeight: .infinity)
             .background(Color.primary.opacity(0.04))
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.25))
-                    .allowsHitTesting(false)
-            )
             .accessibilityIdentifier("agentmux.output.transcript")
         }
         .padding(16)

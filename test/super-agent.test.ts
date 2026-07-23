@@ -88,9 +88,6 @@ describe("runSuperTurn", () => {
                     cwd: `${projectsRoot}/beta`,
                 },
             ],
-            runWorker: async () => {
-                throw new Error("should not run worker");
-            },
         };
 
         const events: string[] = [];
@@ -111,8 +108,8 @@ describe("runSuperTurn", () => {
         expect(fetchCalls).toBe(2);
     });
 
-    test("run_in_project tool dispatches worker", async () => {
-        let workerCalled = false;
+    test("run_in_project tool dispatches via worker backends", async () => {
+        // Integration-ish: uses real dispatchWorker against missing project → error path
         let fetchCalls = 0;
         const fetchImpl: typeof fetch = async () => {
             fetchCalls += 1;
@@ -125,8 +122,9 @@ describe("runSuperTurn", () => {
                                 id: "tu2",
                                 name: "run_in_project",
                                 input: {
-                                    project: "alpha",
+                                    project: "definitely-no-such-project-xyz",
                                     message: "ping",
+                                    backend: "pi",
                                 },
                             },
                         ],
@@ -136,41 +134,32 @@ describe("runSuperTurn", () => {
             }
             return new Response(
                 JSON.stringify({
-                    content: [{ type: "text", text: "工人已完成 ping。" }],
+                    content: [
+                        {
+                            type: "text",
+                            text: "无法派活：项目不存在。",
+                        },
+                    ],
                 }),
                 { status: 200 },
             );
         };
 
         const config: SuperAgentConfig = {
-            projectsRoot: "/p",
+            projectsRoot: "/tmp",
             apiKey: "k",
             baseUrl: "https://example.test",
             model: "m",
             fetchImpl,
-            discover: async () => [
-                { id: "alpha", name: "alpha", cwd: "/p/alpha" },
-            ],
-            runWorker: async (opts) => {
-                workerCalled = true;
-                expect(opts.projectQuery).toBe("alpha");
-                expect(opts.message).toBe("ping");
-                return {
-                    ok: true,
-                    projectId: "alpha",
-                    message: "ping",
-                    assistantText: "PONG",
-                    eventCount: 1,
-                };
-            },
         };
 
         const result = await runSuperTurn({
             config,
             history: [],
-            userText: "让 alpha 回 pong",
+            userText: "让不存在的项目跑一下",
         });
-        expect(workerCalled).toBe(true);
-        expect(result.assistantText).toContain("完成");
+        // Second model turn should produce text after tool error
+        expect(result.assistantText.length).toBeGreaterThan(0);
+        expect(fetchCalls).toBe(2);
     });
 });

@@ -21,7 +21,6 @@ const RESERVED = new Set([
     "ask",
     "dispatch",
     "serve",
-    "worker",
     "register",
     "chat",
     "repl",
@@ -31,6 +30,8 @@ const RESERVED = new Set([
     "agent",
     "jobs",
     "job",
+    "workers",
+    "worker",
     "help",
     "--help",
     "-h",
@@ -105,6 +106,33 @@ export async function runCli(argv: string[]): Promise<number> {
                 );
                 return 0;
             }
+            case "workers": {
+                const { listDispatchableBackends } = await import(
+                    "./workers/index.js"
+                );
+                const list = await listDispatchableBackends();
+                const asJson = rest.includes("--json");
+                if (asJson) {
+                    console.log(JSON.stringify(list, null, 2));
+                    return 0;
+                }
+                console.log(
+                    "ID       AVAIL  PATH\n" +
+                        "----------------------------------------",
+                );
+                for (const w of list) {
+                    console.log(
+                        `${w.id.padEnd(8)} ${w.available ? "yes " : "no  "} ${w.path ?? ""}`,
+                    );
+                }
+                console.log(
+                    `\nAvailable workers: ${list.filter((x) => x.available).map((x) => x.id).join(", ") || "(none)"}`,
+                );
+                console.log(
+                    "Dispatch: am run <project> --backend codex -- <message>",
+                );
+                return 0;
+            }
             case "jobs":
             case "job": {
                 const { listJobs, formatJobsTable } = await import("./jobs.js");
@@ -170,15 +198,25 @@ export async function runCli(argv: string[]): Promise<number> {
             case "run":
             case "do":
             case "ask": {
-                const projectQuery = rest[0];
-                const message = rest.slice(1).join(" ").trim();
+                // am run <project> [--backend X] [--] <message...>
+                let backend: string | undefined;
+                const args = [...rest];
+                const bIdx = args.indexOf("--backend");
+                if (bIdx >= 0) {
+                    backend = args[bIdx + 1];
+                    args.splice(bIdx, 2);
+                }
+                const dd = args.indexOf("--");
+                if (dd >= 0) args.splice(dd, 1);
+                const projectQuery = args[0];
+                const message = args.slice(1).join(" ").trim();
                 if (!projectQuery || !message) {
                     console.error(
-                        "Usage: am run <project> <message...>\n   or: am <project> <message...>",
+                        "Usage: am run <project> [--backend pi|claude|codex|grok|kimi] <message...>",
                     );
                     return 2;
                 }
-                return await runToProject(config, projectQuery, message);
+                return await runToProject(config, projectQuery, message, backend);
             }
             case "dispatch": {
                 // Advanced: send to a long-lived registered worker (socket)
@@ -270,38 +308,35 @@ async function runToProject(
     config: ReturnType<typeof defaultCommanderConfig>,
     projectQuery: string,
     message: string,
+    backend?: string,
 ): Promise<number> {
-    const projects = await discoverProjects({
-        projectsRoot: config.projectsRoot,
-        requireProjectMarker: config.requireProjectMarker,
-    });
-
-    console.error(`AgentMux → ${projectQuery}`);
-    console.error(`cwd root: ${config.projectsRoot}`);
+    const { dispatchWorker } = await import("./workers/index.js");
+    console.error(
+        `AgentMux boss → ${backend ?? "auto"} · project=${projectQuery}`,
+    );
     console.error("---");
 
-    const result = await runOneShot({
+    const result = await dispatchWorker({
+        backend,
         projectQuery,
         message,
-        projects,
-        piBinary: config.piBinary,
-        piArgs: config.piArgs,
-        onTextDelta: (delta) => {
-            process.stdout.write(delta);
-        },
+        projectsRoot: config.projectsRoot,
+        onStdout: (s) => process.stdout.write(s),
+        onStderr: (s) => process.stderr.write(s),
     });
 
-    if (result.assistantText && !result.assistantText.endsWith("\n")) {
+    if (result.text && !result.text.endsWith("\n")) {
         process.stdout.write("\n");
     }
-
     console.error("---");
     if (!result.ok) {
-        console.error(`AgentMux: failed — ${result.error ?? "unknown error"}`);
+        console.error(
+            `AgentMux: failed backend=${result.backend} job=${result.jobId} — ${result.error ?? "unknown"}`,
+        );
         return 1;
     }
     console.error(
-        `AgentMux: done (${result.projectId}, ${result.eventCount} events)`,
+        `AgentMux: done backend=${result.backend} project=${result.projectId} job=${result.jobId}`,
     );
     return 0;
 }
@@ -423,28 +458,27 @@ Primary (talk to the Super Agent — it picks projects & workers):
   am super --rpc                JSONL protocol for the macOS app
   am chat                       Alias of am super
 
-Direct worker (advanced / power users):
-  am <project> <message...>     Skip Super Agent; one-shot worker only
-  am run <project> <message...> Same
+Boss → little brother (headless CLI workers):
+  am workers                    Which brothers can be dispatched
+  am run <project> [--backend pi|claude|codex|grok|kimi] <msg>
+  am <project> <message...>     Same as run with auto backend
 
 Inspect:
   am list                       Projects under ~/Projects
   am agents                     Local agents (path / running / dispatchable)
-  am jobs                       Super-dispatched jobs (done/running/failed)
-  am jobs --json                Jobs as JSON (used by the app)
-  am status <project>
+  am jobs                       Dispatched jobs (done/running/failed)
+  am jobs --json
 
 Examples:
-  am super 看下我有哪些项目
-  am super mindmux-app 登录页提交后没跳转，帮我查
-  am super 同时看 md-converter 的 README 和 agentmux 的 package 名
+  am super 看下我有哪些小弟，用 grok 读 agentmux 的 package 版本
+  am run agentmux --backend claude -- 只读 package.json 版本，别改文件
+  am run agentmux --backend codex -- 总结 README 一句话
 
 Env:
-  AGENTMUX_PROJECTS_ROOT   default: ~/Projects
-  KIMI_API_KEY             Super Agent + workers (or ANTHROPIC_AUTH_TOKEN)
-  ANTHROPIC_BASE_URL       default: https://api.kimi.com/coding
-  AGENTMUX_SUPER_MODEL     default: kimi-for-coding
-  AGENTMUX_PROVIDER/MODEL  worker Pi defaults
+  AGENTMUX_PROJECTS_ROOT      default: ~/Projects
+  AGENTMUX_DEFAULT_BACKEND    pi|claude|codex|grok|kimi
+  KIMI_API_KEY / ANTHROPIC_*  Super Agent auth
+  AGENTMUX_SUPER_MODEL        default: kimi-for-coding
 
 Install:
   curl -fsSL https://raw.githubusercontent.com/robinv8/agentmux/main/scripts/install.sh | bash

@@ -2,21 +2,17 @@
  * Super-agent orchestrator: chat with the user, call tools to list projects
  * and run worker one-shots. This is the "foreman", not a project picker.
  */
-import { discoverProjects, resolveProjectTarget } from "./discovery.js";
-import { runOneShot } from "./oneshot.js";
+import { discoverProjects } from "./discovery.js";
 import {
     formatLocalAgentsTable,
     scanLocalAgents,
 } from "./local-agents.js";
+import { formatJobsTable, listJobs } from "./jobs.js";
 import {
-    createJob,
-    formatJobsTable,
-    listJobs,
-    markJobDone,
-    markJobFailed,
-    markJobRunning,
-} from "./jobs.js";
-import type { ProjectEntry } from "./types.js";
+    dispatchWorker,
+    listDispatchableBackends,
+    normalizeBackendId,
+} from "./workers/index.js";
 
 export type ChatRole = "user" | "assistant";
 
@@ -69,7 +65,6 @@ export interface SuperAgentConfig {
     /** Max tool rounds per user turn */
     maxRounds?: number;
     fetchImpl?: typeof fetch;
-    runWorker?: typeof runOneShot;
     discover?: typeof discoverProjects;
 }
 
@@ -81,15 +76,16 @@ Tools:
 - list_projects: projects under Projects folder
 - list_local_agents: agents installed/running on this machine
 - list_jobs: Super-dispatched jobs (queued/running/done/failed) — USE for "做完了吗/进度"
-- run_in_project: one-shot Pi worker (writes job ledger with final status)
+- run_in_project: dispatch a worker CLI into a project (backend: pi|claude|codex|grok|kimi; default auto)
 
+You are the boss. Available little brothers are local CLIs that AgentMux can spawn headlessly.
 Rules:
 1. Prefer list_projects when the project name is ambiguous.
-2. When asked what agents exist, use list_local_agents.
-3. When asked if a task finished / progress / 进度 / 做完了吗, call list_jobs first. State done/failed/running clearly.
-4. When the user assigns project work, use run_in_project with a concrete worker prompt.
-5. After tools finish, summarize in the user's language; say 已完成/失败/仍在进行 per job.
-6. Only Pi is a dispatchable worker today. External TUI (Grok/Codex/…) process-alive ≠ answer finished.
+2. When asked what agents/workers exist, use list_local_agents.
+3. When asked if a task finished / progress / 进度 / 做完了吗, call list_jobs first.
+4. When assigning work, use run_in_project with a concrete worker prompt. Optionally set backend when user asks for a specific brother (codex/claude/grok/kimi/pi).
+5. After tools finish, summarize; say 已完成/失败/仍在进行 per job and which backend ran.
+6. Prefer backends that are available; if user names an unavailable backend, say so and offer another.
 7. Keep worker prompts concrete.`;
 
 const TOOLS = [
@@ -143,7 +139,7 @@ const TOOLS = [
     {
         name: "run_in_project",
         description:
-            "Dispatch a one-shot coding worker into a project directory. The worker can read/edit code there.",
+            "Dispatch a headless coding worker CLI into a project directory (boss commanding a little brother). Writes job ledger on completion.",
         input_schema: {
             type: "object",
             properties: {
@@ -155,6 +151,11 @@ const TOOLS = [
                     type: "string",
                     description:
                         "Full task for the worker (be specific; this is all the worker sees)",
+                },
+                backend: {
+                    type: "string",
+                    description:
+                        "Worker backend: pi | claude | codex | grok | kimi. Omit for auto (prefers pi).",
                 },
             },
             required: ["project", "message"],
@@ -301,7 +302,6 @@ async function executeTool(
     config: SuperAgentConfig,
 ): Promise<{ text: string; isError: boolean }> {
     const discover = config.discover ?? discoverProjects;
-    const runWorker = config.runWorker ?? runOneShot;
 
     try {
         if (name === "list_projects") {
@@ -377,55 +377,47 @@ async function executeTool(
                 typeof input.project === "string" ? input.project : "";
             const message =
                 typeof input.message === "string" ? input.message : "";
+            const backend = normalizeBackendId(input.backend);
             if (!project || !message) {
                 return {
                     text: "run_in_project requires project and message",
                     isError: true,
                 };
             }
-            const projects = await discover({
-                projectsRoot: config.projectsRoot,
-            });
-            let target: ProjectEntry;
+
+            // Surface available brothers when useful
+            const brothers = await listDispatchableBackends();
+            const available = brothers.filter((b) => b.available).map((b) => b.id);
+
             try {
-                target = resolveProjectTarget(project, projects);
+                const result = await dispatchWorker({
+                    backend,
+                    projectQuery: project,
+                    message,
+                    projectsRoot: config.projectsRoot,
+                });
+                if (!result.ok) {
+                    return {
+                        text:
+                            `Worker FAILED backend=${result.backend} project=${result.projectId} job=${result.jobId}: ${result.error ?? "unknown"}\n` +
+                            `Available backends: ${available.join(", ") || "(none)"}`,
+                        isError: true,
+                    };
+                }
+                return {
+                    text:
+                        `Worker DONE backend=${result.backend} project=${result.projectId} job=${result.jobId}:\n` +
+                        `${result.text ?? "(empty)"}`,
+                    isError: false,
+                };
             } catch (e) {
                 return {
-                    text: e instanceof Error ? e.message : String(e),
+                    text:
+                        (e instanceof Error ? e.message : String(e)) +
+                        `\nAvailable backends: ${available.join(", ") || "(none)"}`,
                     isError: true,
                 };
             }
-
-            const job = await createJob({
-                kind: "run_in_project",
-                toolName: "run_in_project",
-                project: target.id,
-                message,
-                status: "running",
-            });
-            await markJobRunning(job.id);
-
-            const result = await runWorker({
-                projectQuery: target.id,
-                message,
-                projects,
-            });
-            if (!result.ok) {
-                const err = result.error ?? "unknown";
-                await markJobFailed(job.id, err);
-                return {
-                    text: `Worker FAILED in ${target.id} (job ${job.id}): ${err}`,
-                    isError: true,
-                };
-            }
-            const summary =
-                result.assistantText?.trim() ||
-                "(worker finished with empty text)";
-            await markJobDone(job.id, summary);
-            return {
-                text: `Worker DONE in ${target.id} (job ${job.id}):\n${summary}`,
-                isError: false,
-            };
         }
 
         return { text: `Unknown tool: ${name}`, isError: true };

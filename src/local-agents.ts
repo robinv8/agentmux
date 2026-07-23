@@ -42,6 +42,15 @@ export interface LocalAgentScanOptions {
     skipVersion?: boolean;
 }
 
+/** ids that AgentMux can spawn headlessly as workers (boss → brother) */
+export const DISPATCHABLE_BACKEND_IDS = new Set([
+    "pi",
+    "claude",
+    "codex",
+    "grok",
+    "kimi",
+]);
+
 const CATALOG: Array<{
     id: string;
     name: string;
@@ -52,7 +61,8 @@ const CATALOG: Array<{
     processMatch: string[];
     /** home-relative candidate paths */
     homeCandidates?: string[];
-    dispatchable: boolean;
+    /** if true when binary present, Super Agent can dispatch */
+    canDispatchWhenAvailable?: boolean;
 }> = [
     {
         id: "agentmux",
@@ -60,7 +70,7 @@ const CATALOG: Array<{
         kind: "orchestrator",
         binaries: ["am", "agentmux"],
         processMatch: ["AgentMux", "agentmux"],
-        dispatchable: false,
+        canDispatchWhenAvailable: false,
     },
     {
         id: "pi",
@@ -69,7 +79,7 @@ const CATALOG: Array<{
         binaries: ["pi"],
         processMatch: ["pi-coding-agent", "/pi "],
         homeCandidates: [],
-        dispatchable: true,
+        canDispatchWhenAvailable: true,
     },
     {
         id: "grok",
@@ -78,7 +88,7 @@ const CATALOG: Array<{
         binaries: ["grok", "agent"],
         processMatch: ["grok"],
         homeCandidates: [".grok/bin/grok", ".grok/bin/agent"],
-        dispatchable: false,
+        canDispatchWhenAvailable: true,
     },
     {
         id: "codex",
@@ -87,7 +97,7 @@ const CATALOG: Array<{
         binaries: ["codex"],
         processMatch: ["codex"],
         homeCandidates: [".codex/packages/standalone/current/bin/codex"],
-        dispatchable: false,
+        canDispatchWhenAvailable: true,
     },
     {
         id: "kimi",
@@ -96,7 +106,7 @@ const CATALOG: Array<{
         binaries: ["kimi"],
         processMatch: ["kimi"],
         homeCandidates: [".kimi-code/bin/kimi"],
-        dispatchable: false,
+        canDispatchWhenAvailable: true,
     },
     {
         id: "claude",
@@ -104,7 +114,7 @@ const CATALOG: Array<{
         kind: "cli",
         binaries: ["claude"],
         processMatch: ["claude"],
-        dispatchable: false,
+        canDispatchWhenAvailable: true,
     },
     {
         id: "cursor",
@@ -112,7 +122,7 @@ const CATALOG: Array<{
         kind: "editor",
         binaries: ["cursor"],
         processMatch: ["Cursor", "cursor-agent"],
-        dispatchable: false,
+        canDispatchWhenAvailable: false,
     },
     {
         id: "cursor-agent",
@@ -120,7 +130,7 @@ const CATALOG: Array<{
         kind: "cli",
         binaries: ["cursor-agent"],
         processMatch: ["cursor-agent"],
-        dispatchable: false,
+        canDispatchWhenAvailable: false,
     },
     {
         id: "openclaw",
@@ -128,7 +138,7 @@ const CATALOG: Array<{
         kind: "cli",
         binaries: ["openclaw"],
         processMatch: ["openclaw"],
-        dispatchable: false,
+        canDispatchWhenAvailable: false,
     },
 ];
 
@@ -231,8 +241,12 @@ export async function scanLocalAgents(
         if (entry.id === "pi" && foundPath?.includes("node_modules")) {
             notes.push("bundled with AgentMux (default worker)");
         }
-        if (!entry.dispatchable && entry.id !== "agentmux") {
-            notes.push("installed locally; not yet wired as Super Agent worker");
+        const dispatchable =
+            Boolean(foundPath) && Boolean(entry.canDispatchWhenAvailable);
+        if (dispatchable) {
+            notes.push("headless worker — Super Agent can dispatch");
+        } else if (foundPath && entry.id !== "agentmux") {
+            notes.push("installed; not a headless dispatch backend yet");
         }
 
         results.push({
@@ -244,7 +258,7 @@ export async function scanLocalAgents(
             available: Boolean(foundPath),
             runningCount,
             notes: notes.length ? notes : undefined,
-            dispatchable: entry.dispatchable && Boolean(foundPath),
+            dispatchable,
         });
     }
 

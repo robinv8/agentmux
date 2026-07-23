@@ -57,11 +57,10 @@ Optional: force a different Pi binary with `PI_BIN=/path/to/pi` (default uses th
 
 ```bash
 am super                      # Super Agent chat (primary)
-am super 看下我有哪些项目
-am super mindmux-app 登录有问题，帮我查
-
-am list                       # raw inventory
-am mindmux-app Fix login      # direct worker (skip Super Agent)
+am super 看下我有哪些小弟，用 grok 读 agentmux 的 package 版本
+am workers                    # pi / claude / codex / grok / kimi 谁可派
+am run agentmux --backend grok -- 一句话说明本仓库
+am jobs                       # 任务是否 done
 ```
 
 macOS Super Agent chat app:

@@ -11,3 +11,4 @@ export * from "./super-agent.js";
 export * from "./super-rpc.js";
 export * from "./local-agents.js";
 export * from "./jobs.js";
+export * from "./workers/index.js";

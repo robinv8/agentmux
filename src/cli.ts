@@ -209,6 +209,7 @@ async function runToProject(
         message,
         projects,
         piBinary: config.piBinary,
+        piArgs: config.piArgs,
         onTextDelta: (delta) => {
             process.stdout.write(delta);
         },
@@ -306,7 +307,10 @@ Env:
   AGENTMUX_PROJECTS_ROOT   default: ~/Projects
   AGENTMUX_REGISTRY        default: ~/.pi/agent/workers.json
   AGENTMUX_SOCKETS         default: ~/.pi/agent/worker-sockets
+  AGENTMUX_PROVIDER        e.g. kimi-coding (passed to pi --provider)
+  AGENTMUX_MODEL           e.g. kimi-for-coding (passed to pi --model)
   PI_BIN                   override Pi binary (default: bundled with AgentMux)
+  KIMI_API_KEY             for kimi-coding (falls back to ANTHROPIC_AUTH_TOKEN)
 
 Install:
   curl -fsSL https://raw.githubusercontent.com/robinv8/agentmux/main/scripts/install.sh | bash

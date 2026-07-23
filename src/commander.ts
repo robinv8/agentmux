@@ -42,6 +42,8 @@ export interface CommanderConfig {
     rpcClient?: PiRpcClient;
     processProbe?: ProcessProbe;
     piBinary?: string;
+    /** Extra CLI args for `pi` (provider/model/etc.) */
+    piArgs?: string[];
     requireProjectMarker?: boolean;
 }
 
@@ -65,6 +67,7 @@ export function defaultCommanderConfig(
         rpcClient: overrides.rpcClient ?? new SocketPiRpcClient(),
         processProbe: overrides.processProbe ?? defaultProcessProbe,
         piBinary: overrides.piBinary ?? resolvePiBinary(),
+        piArgs: overrides.piArgs,
         requireProjectMarker: overrides.requireProjectMarker ?? false,
     };
 }

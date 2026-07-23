@@ -25,6 +25,7 @@ export type OneShotSpawner = (opts: {
     piBinary: string;
     cwd: string;
     args: string[];
+    env?: NodeJS.ProcessEnv;
 }) => OneShotSpawnResult;
 
 export interface RunOneShotOptions {
@@ -32,6 +33,10 @@ export interface RunOneShotOptions {
     message: string;
     projects: ProjectEntry[];
     piBinary?: string;
+    /** Extra args after the pi binary (e.g. --provider kimi-coding) */
+    piArgs?: string[];
+    /** Env overrides for the Pi child (merged onto process.env) */
+    env?: NodeJS.ProcessEnv;
     /** Wait for agent_settled; default 10 minutes */
     timeoutMs?: number;
     /** Stream text deltas to this callback (e.g. process.stdout.write) */
@@ -46,10 +51,15 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 /**
  * Default spawner: `pi --mode rpc --no-session` with piped stdio.
  */
-export const defaultPiSpawner: OneShotSpawner = ({ piBinary, cwd, args }) => {
+export const defaultPiSpawner: OneShotSpawner = ({
+    piBinary,
+    cwd,
+    args,
+    env,
+}) => {
     const child = spawn(piBinary, args, {
         cwd,
-        env: process.env,
+        env: env ?? process.env,
         stdio: ["pipe", "pipe", "pipe"],
     }) as ChildProcessWithoutNullStreams;
 
@@ -63,6 +73,56 @@ export const defaultPiSpawner: OneShotSpawner = ({ piBinary, cwd, args }) => {
         pid: child.pid,
     };
 };
+
+/**
+ * Build `pi --mode rpc` argv + env for one-shot workers.
+ * Honors AGENTMUX_PROVIDER / AGENTMUX_MODEL / PI_PROVIDER / PI_MODEL,
+ * and maps ANTHROPIC_AUTH_TOKEN → KIMI_API_KEY when Kimi Coding is used.
+ */
+export function buildPiRpcLaunch(options: {
+    piArgs?: string[];
+    env?: NodeJS.ProcessEnv;
+    provider?: string;
+    model?: string;
+} = {}): { args: string[]; env: NodeJS.ProcessEnv } {
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        ...options.env,
+    };
+
+    // Kimi For Coding reads KIMI_API_KEY; many shells only export ANTHROPIC_* for the same key.
+    if (!env.KIMI_API_KEY) {
+        const kimiish =
+            env.ANTHROPIC_AUTH_TOKEN ||
+            env.ANTHROPIC_API_KEY ||
+            env.MOONSHOT_API_KEY;
+        if (kimiish) env.KIMI_API_KEY = kimiish;
+    }
+
+    let provider =
+        options.provider ||
+        env.AGENTMUX_PROVIDER ||
+        env.PI_PROVIDER ||
+        "";
+    let model =
+        options.model || env.AGENTMUX_MODEL || env.PI_MODEL || "";
+
+    // Prefer Kimi For Coding when its key is available and user did not pick a provider.
+    if (!provider && env.KIMI_API_KEY) {
+        provider = "kimi-coding";
+        if (!model) model = "kimi-for-coding";
+    }
+
+    const args = ["--mode", "rpc", "--no-session", ...(options.piArgs ?? [])];
+    if (provider && !args.includes("--provider")) {
+        args.push("--provider", provider);
+    }
+    if (model && !args.includes("--model")) {
+        args.push("--model", model);
+    }
+
+    return { args, env };
+}
 
 /**
  * Run one prompt against a project in a short-lived Pi RPC process.
@@ -100,13 +160,18 @@ export async function runOneShot(
     const piBinary = options.piBinary ?? resolvePiBinary();
     const spawner = options.spawner ?? defaultPiSpawner;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const launch = buildPiRpcLaunch({
+        piArgs: options.piArgs,
+        env: options.env,
+    });
 
     let proc: OneShotSpawnResult;
     try {
         proc = spawner({
             piBinary,
             cwd: project.cwd,
-            args: ["--mode", "rpc", "--no-session"],
+            args: launch.args,
+            env: launch.env,
         });
     } catch (err) {
         return {
@@ -122,6 +187,7 @@ export async function runOneShot(
     let buffer = "";
     let eventCount = 0;
     let lastAssistantText = "";
+    let lastErrorMessage = "";
     let promptAccepted = false;
     let settled = false;
     let stderr = "";
@@ -208,25 +274,37 @@ export async function runOneShot(
 
                 if (event.type === "message_end") {
                     const msg = event.message as
-                        | { role?: string; content?: unknown }
+                        | {
+                              role?: string;
+                              content?: unknown;
+                              stopReason?: string;
+                              errorMessage?: string;
+                          }
                         | undefined;
                     if (msg?.role === "assistant") {
                         const text = extractAssistantText(msg.content);
                         if (text) lastAssistantText = text;
+                        if (msg.stopReason === "error" && msg.errorMessage) {
+                            lastErrorMessage = msg.errorMessage;
+                        }
                     }
                 }
 
                 if (event.type === "agent_settled") {
                     settled = true;
+                    const ok =
+                        Boolean(lastAssistantText) && !lastErrorMessage;
                     finish({
-                        ok: promptAccepted || lastAssistantText.length > 0,
+                        ok,
                         projectId: project.id,
                         message,
                         assistantText: lastAssistantText || undefined,
-                        error:
-                            promptAccepted || lastAssistantText
-                                ? undefined
-                                : "Worker settled without accepting prompt",
+                        error: ok
+                            ? undefined
+                            : lastErrorMessage ||
+                              (promptAccepted
+                                  ? "Worker settled without assistant text"
+                                  : "Worker settled without accepting prompt"),
                         eventCount,
                     });
                 }
